@@ -61,8 +61,9 @@ var (
 
 var addUser = &cobra.Command{
 	Use:     "add user-name",
-	Example: "  pb user add bob",
+	Example: "  pb user add bob --role reader",
 	Short:   "Add a new user",
+	Long:    "Add a self-hosted user and assign at least one existing role. For Parseable Cloud, invite the user from the dashboard instead.",
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		startTime := time.Now()
@@ -200,6 +201,7 @@ var RemoveUserCmd = &cobra.Command{
 var SetUserRoleCmd = &cobra.Command{
 	Use:     "set-role user-name roles",
 	Short:   "Add roles to a user",
+	Long:    "Add one or more roles to a user without removing their existing role assignments.",
 	Example: "  pb user set-role bob admin,developer",
 	PreRunE: func(_ *cobra.Command, args []string) error {
 		if len(args) < 2 {

@@ -69,6 +69,7 @@ var AddRoleCmd = &cobra.Command{
 	Use:     "add role-name",
 	Example: "  pb role add ingestors",
 	Short:   "Add a new role",
+	Long:    "Add a new role using an interactive prompt that asks only for its privilege.",
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		startTime := time.Now()
@@ -147,8 +148,9 @@ var AddRoleCmd = &cobra.Command{
 var RemoveRoleCmd = &cobra.Command{
 	Use:     "remove role-name",
 	Aliases: []string{"rm"},
-	Example: "  pb role remove ingestor",
+	Example: "  pb role remove ingestor\n  pb role rm ingestor",
 	Short:   "Delete a role",
+	Long:    "Delete an existing role. If the role name is missing, show the available role names without sending a delete request.",
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		startTime := time.Now()
