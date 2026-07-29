@@ -20,6 +20,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -70,6 +72,11 @@ var addUser = &cobra.Command{
 		}()
 
 		name := args[0]
+		if DefaultProfile.Cloud {
+			fmt.Println(cloudAddUserMessage())
+			cmd.Annotations["error"] = "user creation is not supported for cloud profiles"
+			return nil
+		}
 
 		client := internalHTTP.DefaultClient(&DefaultProfile)
 		users, err := fetchUsers(&client)
@@ -87,22 +94,24 @@ var addUser = &cobra.Command{
 		}
 
 		// fetch all the roles to be applied to this user
-		rolesToSet := cmd.Flag(roleFlag).Value.String()
-		rolesToSetArr := strings.Split(rolesToSet, ",")
-
-		// fetch the role names on the server
+		rolesToSet := strings.TrimSpace(cmd.Flag(roleFlag).Value.String())
 		var rolesOnServer []string
 		if err := fetchRoles(&client, &rolesOnServer); err != nil {
 			cmd.Annotations["error"] = err.Error()
 			return err
 		}
-		rolesOnServerArr := strings.Join(rolesOnServer, " ")
+		if rolesToSet == "" {
+			fmt.Println(selfHostedAddUserRoleMessage(name, rolesOnServer))
+			cmd.Annotations["error"] = "at least one role is required"
+			return nil
+		}
+		rolesToSetArr := strings.Split(rolesToSet, ",")
 
 		// validate if roles to be applied are actually present on the server
 		for idx, role := range rolesToSetArr {
 			rolesToSetArr[idx] = strings.TrimSpace(role)
-			if !strings.Contains(rolesOnServerArr, rolesToSetArr[idx]) {
-				fmt.Printf("role %s doesn't exist, please create a role using pb role add %s\n", rolesToSetArr[idx], rolesToSetArr[idx])
+			if !slices.Contains(rolesOnServer, rolesToSetArr[idx]) {
+				fmt.Printf("role %s doesn't exist. Create it first with `pb role add %s`, or use an existing role with `pb user add %s --role <role>`\n", rolesToSetArr[idx], rolesToSetArr[idx], name)
 				cmd.Annotations["error"] = fmt.Sprintf("role %s doesn't exist", rolesToSetArr[idx])
 				return nil
 			}
@@ -190,7 +199,7 @@ var RemoveUserCmd = &cobra.Command{
 
 var SetUserRoleCmd = &cobra.Command{
 	Use:     "set-role user-name roles",
-	Short:   "Set roles for a user",
+	Short:   "Add roles to a user",
 	Example: "  pb user set-role bob admin,developer",
 	PreRunE: func(_ *cobra.Command, args []string) error {
 		if len(args) < 2 {
@@ -216,7 +225,7 @@ var SetUserRoleCmd = &cobra.Command{
 		if !slices.ContainsFunc(users, func(user UserData) bool {
 			return user.ID == name
 		}) {
-			fmt.Printf("user doesn't exist. Please create the user with `pb user add %s`\n", name)
+			fmt.Println(missingUserMessage(name, DefaultProfile.Cloud))
 			cmd.Annotations["error"] = "user does not exist"
 			return nil
 		}
@@ -228,21 +237,16 @@ var SetUserRoleCmd = &cobra.Command{
 			cmd.Annotations["error"] = err.Error()
 			return err
 		}
-		rolesOnServerArr := strings.Join(rolesOnServer, " ")
-
 		for idx, role := range rolesToSetArr {
 			rolesToSetArr[idx] = strings.TrimSpace(role)
-			if !strings.Contains(rolesOnServerArr, rolesToSetArr[idx]) {
+			if !slices.Contains(rolesOnServer, rolesToSetArr[idx]) {
 				fmt.Printf("role %s doesn't exist, please create a role using `pb role add %s`\n", rolesToSetArr[idx], rolesToSetArr[idx])
 				cmd.Annotations["error"] = fmt.Sprintf("role %s doesn't exist", rolesToSetArr[idx])
 				return nil
 			}
 		}
 
-		var putBody io.Reader
-		putBodyJSON, _ := json.Marshal(rolesToSetArr)
-		putBody = bytes.NewBuffer([]byte(putBodyJSON))
-		req, err := client.NewRequest("PUT", "user/"+name+"/role", putBody)
+		req, err := newAddUserRolesRequest(&client, name, rolesToSetArr)
 		if err != nil {
 			cmd.Annotations["error"] = err.Error()
 			return err
@@ -272,6 +276,35 @@ var SetUserRoleCmd = &cobra.Command{
 
 		return nil
 	},
+}
+
+func newAddUserRolesRequest(client *internalHTTP.HTTPClient, name string, roles []string) (*http.Request, error) {
+	body, err := json.Marshal(roles)
+	if err != nil {
+		return nil, err
+	}
+	return client.NewRequest(http.MethodPatch, "user/"+name+"/role/add", bytes.NewReader(body))
+}
+
+func missingUserMessage(name string, cloud bool) string {
+	if cloud {
+		return fmt.Sprintf("user doesn't exist. Please invite the user from the Parseable Cloud dashboard first, then set the role with `pb user set-role %s <role>`", name)
+	}
+	return fmt.Sprintf("user doesn't exist. Please create the user with `pb user add %s`", name)
+}
+
+func cloudAddUserMessage() string {
+	return "`pb user add` is not available for Parseable Cloud. Please invite the user from the Parseable Cloud dashboard"
+}
+
+func selfHostedAddUserRoleMessage(name string, roles []string) string {
+	if len(roles) == 0 {
+		return fmt.Sprintf("a role is required to create user %s. No roles are available. Create one first with `pb role add <role>`, then run `pb user add %s --role <role>`", name, name)
+	}
+
+	roleNames := append([]string(nil), roles...)
+	sort.Strings(roleNames)
+	return fmt.Sprintf("a role is required to create user %s.\nAvailable roles: %s\nAssign one, for example: `pb user add %s --role %s`", name, strings.Join(roleNames, ", "), name, roleNames[0])
 }
 
 var ListUserCmd = &cobra.Command{
