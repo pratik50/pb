@@ -30,10 +30,13 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
+	"golang.org/x/exp/slices"
 )
 
 type RoleResource struct {
-	Stream string `json:"stream,omitempty"`
+	Dataset string `json:"dataset,omitempty"`
+	Tag     string `json:"tag,omitempty"`
+	Stream  string `json:"stream,omitempty"` // Legacy response compatibility.
 }
 
 type RoleData struct {
@@ -47,9 +50,14 @@ func (user *RoleData) Render() string {
 	s.WriteString(StandardStyleAlt.Render(user.Privilege))
 	s.WriteString("\n")
 	if user.Resource != nil {
-		if user.Resource.Stream != "" {
-			s.WriteString(StandardStyle.Render("Stream:    "))
-			s.WriteString(StandardStyleAlt.Render(user.Resource.Stream))
+		if dataset := roleDataset(*user.Resource); dataset != "" {
+			s.WriteString(StandardStyle.Render("Dataset:   "))
+			s.WriteString(StandardStyleAlt.Render(dataset))
+			s.WriteString("\n")
+		}
+		if user.Resource.Tag != "" {
+			s.WriteString(StandardStyle.Render("Tag:       "))
+			s.WriteString(StandardStyleAlt.Render(user.Resource.Tag))
 			s.WriteString("\n")
 		}
 	}
@@ -61,6 +69,7 @@ var AddRoleCmd = &cobra.Command{
 	Use:     "add role-name",
 	Example: "  pb role add ingestors",
 	Short:   "Add a new role",
+	Long:    "Add a new role using an interactive prompt that asks only for its privilege.",
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		startTime := time.Now()
@@ -78,7 +87,7 @@ var AddRoleCmd = &cobra.Command{
 			return err
 		}
 
-		if strings.Contains(strings.Join(roles, " "), name) {
+		if slices.Contains(roles, name) {
 			fmt.Println("role already exists, please use a different name")
 			return nil
 		}
@@ -91,25 +100,19 @@ var AddRoleCmd = &cobra.Command{
 
 		m := _m.(role.Model)
 		privilege := m.Selection.Value()
-		stream := m.Stream.Value()
 
 		if !m.Success {
 			fmt.Println("aborted by user")
 			return nil
 		}
 
-		var putBody io.Reader
-		if privilege != "none" {
-			roleData := RoleData{Privilege: privilege}
-			switch privilege {
-			case "writer", "ingestor":
-				roleData.Resource = &RoleResource{Stream: stream}
-			case "reader":
-				roleData.Resource = &RoleResource{Stream: stream}
-			}
-			roleDataJSON, _ := json.Marshal([]RoleData{roleData})
-			putBody = bytes.NewBuffer(roleDataJSON)
+		roleData := newRoleData(privilege)
+		roleDataJSON, err := json.Marshal([]RoleData{roleData})
+		if err != nil {
+			cmd.Annotations["errors"] = fmt.Sprintf("Error encoding role: %s", err.Error())
+			return err
 		}
+		var putBody io.Reader = bytes.NewBuffer(roleDataJSON)
 
 		req, err := client.NewRequest("PUT", "role/"+name, putBody)
 		if err != nil {
@@ -145,8 +148,9 @@ var AddRoleCmd = &cobra.Command{
 var RemoveRoleCmd = &cobra.Command{
 	Use:     "remove role-name",
 	Aliases: []string{"rm"},
-	Example: "  pb role remove ingestor",
+	Example: "  pb role remove ingestor\n  pb role rm ingestor",
 	Short:   "Delete a role",
+	Long:    "Delete an existing role. If the role name is missing, show the available role names without sending a delete request.",
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		startTime := time.Now()
@@ -157,6 +161,17 @@ var RemoveRoleCmd = &cobra.Command{
 
 		name := args[0]
 		client := internalHTTP.DefaultClient(&DefaultProfile)
+		var roles []string
+		if err := fetchRoles(&client, &roles); err != nil {
+			cmd.Annotations["errors"] = fmt.Sprintf("Error fetching roles: %s", err.Error())
+			return err
+		}
+		if !slices.Contains(roles, name) {
+			fmt.Println(missingRoleMessage(name, roles))
+			cmd.Annotations["errors"] = fmt.Sprintf("role %s does not exist", name)
+			return nil
+		}
+
 		req, err := client.NewRequest("DELETE", "role/"+name, nil)
 		if err != nil {
 			cmd.Annotations["errors"] = fmt.Sprintf("Error creating delete request: %s", err.Error())
@@ -272,7 +287,7 @@ func printRoleTable(roles []string, roleResponses []struct {
 
 	roleWidth := lipgloss.Width("ROLE")
 	privilegeWidth := lipgloss.Width("PRIVILEGE")
-	streamWidth := lipgloss.Width("STREAM")
+	streamWidth := lipgloss.Width("DATASET")
 
 	for idx, roleName := range roles {
 		roleW := lipgloss.Width(roleName)
@@ -337,7 +352,7 @@ func printRoleTable(roles []string, roleResponses []struct {
 	fmt.Printf("%s%s%s\n",
 		headerStyle.Render(padRight("ROLE", privilegeColumn+1)),
 		headerStyle.Render(padRight("PRIVILEGE", privilegeWidth+5)),
-		headerStyle.Render("STREAM"),
+		headerStyle.Render("DATASET"),
 	)
 	fmt.Printf("%s%s%s\n",
 		ruleStyle.Render(strings.Repeat("─", privilegeColumn+1)),
@@ -380,10 +395,34 @@ func printRoleTable(roles []string, roleResponses []struct {
 }
 
 func roleStream(action RoleData) string {
-	if action.Resource == nil || action.Resource.Stream == "" {
+	if action.Resource == nil {
 		return "-"
 	}
-	return action.Resource.Stream
+	if dataset := roleDataset(*action.Resource); dataset != "" {
+		return dataset
+	}
+	return "-"
+}
+
+func roleDataset(resource RoleResource) string {
+	if resource.Dataset != "" {
+		return resource.Dataset
+	}
+	return resource.Stream
+}
+
+func newRoleData(privilege string) RoleData {
+	return RoleData{Privilege: privilege}
+}
+
+func missingRoleMessage(name string, roles []string) string {
+	if len(roles) == 0 {
+		return fmt.Sprintf("role %s doesn't exist. No roles are available", name)
+	}
+
+	roleNames := append([]string(nil), roles...)
+	slices.Sort(roleNames)
+	return fmt.Sprintf("role %s doesn't exist. Available role names: %s", name, strings.Join(roleNames, ", "))
 }
 
 func orDash(value string) string {

@@ -295,6 +295,13 @@ pb status
 pb version
 ```
 
+User and role behavior:
+
+- `pb user add` creates self-hosted users and requires at least one existing role. Parseable Cloud users must be invited from the Cloud dashboard instead.
+- `pb user set-role` adds the requested roles without removing the user's existing role assignments.
+- `pb role add` starts an interactive prompt that asks only for a privilege: `admin`, `editor`, `ingestor`, `reader`, or `writer`.
+- `pb role remove` (or `pb role rm`) deletes an existing role. If the role name does not exist, the CLI shows the available role names and does not send a delete request.
+
 Short aliases are available for common commands:
 
 ```bash

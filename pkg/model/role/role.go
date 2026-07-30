@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/parseablehq/pb/pkg/model/button"
@@ -29,11 +28,8 @@ import (
 )
 
 var (
-	privileges             = []string{"none", "admin", "editor", "writer", "reader", "ingestor"}
-	navigationMapStreamTag = []string{"role", "stream", "tag", "button"}
-	navigationMapStream    = []string{"role", "stream", "button"}
-	navigationMap          = []string{"role", "button"}
-	navigationMapNone      = []string{"role"}
+	privileges    = []string{"admin", "editor", "ingestor", "reader", "writer"}
+	navigationMap = []string{"role", "button"}
 )
 
 // Style for role selection widget
@@ -55,45 +51,19 @@ type Model struct {
 	focusIndex int
 	navMap     *[]string
 	Selection  selection.Model
-	Stream     textinput.Model
-	Tag        textinput.Model
 	button     button.Model
 	Success    bool
-}
-
-func (m *Model) Valid() bool {
-	switch m.Selection.Value() {
-	case "admin", "editor", "none":
-		return true
-	case "writer", "reader", "ingestor":
-		return !strings.Contains(m.Stream.Value(), " ") && m.Stream.Value() != ""
-	}
-	return true
 }
 
 func (m *Model) FocusSelected() {
 	m.Selection.Blur()
 	m.Selection.FocusStyle = selectionFocusStyle
-	m.Stream.Blur()
-	m.Stream.TextStyle = blurredStyle
-	m.Stream.PromptStyle = blurredStyle
-	m.Tag.Blur()
-	m.Tag.TextStyle = blurredStyle
-	m.Tag.PromptStyle = blurredStyle
 	m.button.Blur()
 
 	switch (*m.navMap)[m.focusIndex] {
 	case "role":
 		m.Selection.Focus()
 		m.Selection.FocusStyle = selectionFocusStyleAlt
-	case "stream":
-		m.Stream.TextStyle = focusedStyle
-		m.Stream.PromptStyle = focusedStyle
-		m.Stream.Focus()
-	case "tag":
-		m.Tag.TextStyle = focusedStyle
-		m.Tag.PromptStyle = focusedStyle
-		m.Tag.Focus()
 	case "button":
 		m.button.Focus()
 	}
@@ -107,18 +77,10 @@ func New() Model {
 	button.FocusStyle = focusedStyle
 	button.BlurredStyle = blurredStyle
 
-	stream := textinput.New()
-	stream.Prompt = "stream: "
-
-	tag := textinput.New()
-	tag.Prompt = "tag: "
-
 	m := Model{
 		focusIndex: 0,
-		navMap:     &navigationMapNone,
+		navMap:     &navigationMap,
 		Selection:  selection,
-		Stream:     stream,
-		Tag:        tag,
 		button:     button,
 		Success:    false,
 	}
@@ -138,12 +100,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Success = true
 		return m, tea.Quit
 	case tea.KeyMsg:
-		// special cases for enter key
 		if msg.Type == tea.KeyEnter {
-			if m.Selection.Value() == "none" {
-				m.Success = true
-				return m, tea.Quit
-			}
 			if m.button.Focused() && !m.button.Invalid {
 				m.button, cmd = m.button.Update(msg)
 				return m, cmd
@@ -169,26 +126,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch (*m.navMap)[m.focusIndex] {
 			case "role":
 				m.Selection, cmd = m.Selection.Update(msg)
-				switch m.Selection.Value() {
-				case "admin", "editor":
-					m.navMap = &navigationMap
-				case "writer":
-					m.navMap = &navigationMapStream
-				case "reader":
-					m.navMap = &navigationMapStreamTag
-				case "ingestor":
-					m.navMap = &navigationMapStream
-				default:
-					m.navMap = &navigationMapNone
-				}
-			case "stream":
-				m.Stream, cmd = m.Stream.Update(msg)
-			case "tag":
-				m.Tag, cmd = m.Tag.Update(msg)
 			case "button":
 				m.button, cmd = m.button.Update(msg)
 			}
-			m.button.Invalid = !m.Valid()
 		}
 	}
 	return m, cmd
@@ -207,18 +147,10 @@ func (m Model) View() string {
 				buffer = m.Selection.View()
 			}
 			fmt.Fprintln(&b, buffer)
-		case "stream":
-			fmt.Fprintln(&b, m.Stream.View())
-		case "tag":
-			fmt.Fprintln(&b, m.Tag.View())
 		case "button":
 			fmt.Fprintln(&b)
 			fmt.Fprintln(&b, m.button.View())
 		}
-	}
-
-	if m.Selection.Value() == "none" {
-		fmt.Fprintln(&b, blurredStyle.Render("Press enter to create user without a role"))
 	}
 
 	return b.String()
