@@ -168,23 +168,22 @@ var AddDatasetCmd = &cobra.Command{
 			cmd.Annotations["errors"] = fmt.Sprintf("Error: %s", err.Error())
 			return err
 		}
+		defer resp.Body.Close()
 
 		// Capture execution time
 		cmd.Annotations["executionTime"] = time.Since(startTime).String()
 
-		if resp.StatusCode == 200 {
-			fmt.Printf("Created %s dataset %s\n", SelectedStyle.Render(datasetType), StyleBold.Render(name))
-		} else {
-			bytes, err := io.ReadAll(resp.Body)
+		if resp.StatusCode != http.StatusOK {
+			body, err := io.ReadAll(resp.Body)
 			if err != nil {
 				cmd.Annotations["errors"] = fmt.Sprintf("Error: %s", err.Error())
 				return err
 			}
-			body := string(bytes)
-			defer resp.Body.Close()
-			fmt.Printf("Request Failed\nStatus Code: %s\nResponse: %s\n", resp.Status, body)
+			requestErr := responseStatusError("create dataset", resp.StatusCode, resp.Status, body)
+			cmd.Annotations["errors"] = requestErr.Error()
+			return requestErr
 		}
-
+		fmt.Printf("Created %s dataset %s\n", SelectedStyle.Render(datasetType), StyleBold.Render(name))
 		return nil
 	},
 }
@@ -386,8 +385,11 @@ var StatDatasetCmd = &cobra.Command{
 		}
 
 		// Check output format
-		output, _ := cmd.Flags().GetString("output")
-		if output == "json" {
+		output, err := commandOutputFormat(cmd)
+		if err != nil {
+			return err
+		}
+		if output == outputJSON {
 			// Prepare JSON response
 			data := map[string]interface{}{
 				"info": map[string]interface{}{
@@ -397,17 +399,14 @@ var StatDatasetCmd = &cobra.Command{
 					"compression_ratio": fmt.Sprintf("%.2f%%", compressionRatio),
 				},
 				"retention":    retention,
-				"alerts":       alertsData.Alerts,
+				"alerts":       nonNilSlice(alertsData.Alerts),
 				"dataset_type": datasetType,
 			}
 
-			jsonData, err := json.MarshalIndent(data, "", "  ")
-			if err != nil {
-				// Capture error
+			if err := writeJSON(cmd.OutOrStdout(), data); err != nil {
 				cmd.Annotations["errors"] = fmt.Sprintf("Error: %s", err.Error())
 				return err
 			}
-			fmt.Println(string(jsonData))
 		} else {
 			// Default text output
 			isRetentionSet := len(retention) > 0
@@ -518,23 +517,22 @@ var RemoveDatasetCmd = &cobra.Command{
 			cmd.Annotations["errors"] = fmt.Sprintf("Error: %s", err.Error())
 			return err
 		}
+		defer resp.Body.Close()
 
 		// Capture execution time
 		cmd.Annotations["executionTime"] = time.Since(startTime).String()
 
-		if resp.StatusCode == 200 {
-			fmt.Printf("Successfully deleted dataset %s\n", StyleBold.Render(name))
-		} else {
-			bytes, err := io.ReadAll(resp.Body)
+		if resp.StatusCode != http.StatusOK {
+			body, err := io.ReadAll(resp.Body)
 			if err != nil {
 				cmd.Annotations["errors"] = fmt.Sprintf("Error: %s", err.Error())
 				return err
 			}
-			body := string(bytes)
-			defer resp.Body.Close()
-			fmt.Printf("Request Failed\nStatus Code: %s\nResponse: %s\n", resp.Status, body)
+			requestErr := responseStatusError("delete dataset", resp.StatusCode, resp.Status, body)
+			cmd.Annotations["errors"] = requestErr.Error()
+			return requestErr
 		}
-
+		fmt.Printf("Successfully deleted dataset %s\n", StyleBold.Render(name))
 		return nil
 	},
 }
@@ -571,15 +569,15 @@ var ListDatasetCmd = &cobra.Command{
 			return err
 		}
 
-		output, _ := cmd.Flags().GetString("output")
-		if output == "json" {
-			jsonData, err := json.MarshalIndent(items, "", "  ")
-			if err != nil {
-				cmd.Annotations["errors"] = fmt.Sprintf("Error: %s", err.Error())
-				return err
+		output, err := commandOutputFormat(cmd)
+		if err != nil {
+			return err
+		}
+		if output == outputJSON {
+			if items == nil {
+				items = []datasets.Dataset{}
 			}
-			fmt.Println(string(jsonData))
-			return nil
+			return writeJSON(cmd.OutOrStdout(), items)
 		}
 
 		for _, dataset := range items {
@@ -617,7 +615,8 @@ func fetchStats(client *internalHTTP.HTTPClient, name string) (data DatasetStats
 	case http.StatusNotFound:
 		// stream exists but has no stats yet (empty stream)
 	default:
-		err = fmt.Errorf("Request Failed\nStatus Code: %s\nResponse: %s\n", resp.Status, string(bytes))
+		legacyMessage := fmt.Sprintf("Request Failed\nStatus Code: %s\nResponse: %s\n", resp.Status, string(bytes))
+		err = httpStatusCLIError(resp.StatusCode, legacyMessage, fmt.Sprintf("request failed: %s", resp.Status))
 	}
 	return
 }
@@ -645,7 +644,8 @@ func fetchRetention(client *internalHTTP.HTTPClient, name string) (data DatasetR
 	case http.StatusNotFound:
 		// no retention configured
 	default:
-		err = fmt.Errorf("Request Failed\nStatus Code: %s\nResponse: %s\n", resp.Status, string(bytes))
+		legacyMessage := fmt.Sprintf("Request Failed\nStatus Code: %s\nResponse: %s\n", resp.Status, string(bytes))
+		err = httpStatusCLIError(resp.StatusCode, legacyMessage, fmt.Sprintf("request failed: %s", resp.Status))
 	}
 	return
 }
@@ -673,7 +673,8 @@ func fetchAlerts(client *internalHTTP.HTTPClient, name string) (data AlertConfig
 	case http.StatusNotFound:
 		// no alerts configured
 	default:
-		err = fmt.Errorf("Request Failed\nStatus Code: %s\nResponse: %s\n", resp.Status, string(bytes))
+		legacyMessage := fmt.Sprintf("Request Failed\nStatus Code: %s\nResponse: %s\n", resp.Status, string(bytes))
+		err = httpStatusCLIError(resp.StatusCode, legacyMessage, fmt.Sprintf("request failed: %s", resp.Status))
 	}
 	return
 }
@@ -717,9 +718,11 @@ func fetchInfo(client *internalHTTP.HTTPClient, name string) (datasetType string
 		}
 		return response.StreamType, nil
 	case http.StatusNotFound:
-		return "", fmt.Errorf("dataset %q not found", name)
+		message := fmt.Sprintf("dataset %q not found", name)
+		return "", httpStatusCLIError(resp.StatusCode, message, message)
 	default:
 		// Handle non-200 responses
-		return "", fmt.Errorf("Request Failed\nStatus Code: %d\nResponse: %s\n", resp.StatusCode, string(bytes))
+		legacyMessage := fmt.Sprintf("Request Failed\nStatus Code: %d\nResponse: %s\n", resp.StatusCode, string(bytes))
+		return "", httpStatusCLIError(resp.StatusCode, legacyMessage, fmt.Sprintf("request failed: %s", resp.Status))
 	}
 }

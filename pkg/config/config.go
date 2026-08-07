@@ -181,18 +181,18 @@ func WriteConfigToFile(config *Config) error {
 
 	file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
-		fmt.Println("Error creating the file:", err)
+		fmt.Fprintln(os.Stderr, "Error creating the file:", err)
 		return err
 	}
 	defer file.Close()
 	if err := file.Chmod(0o600); err != nil {
-		fmt.Println("Error setting file permissions:", err)
+		fmt.Fprintln(os.Stderr, "Error setting file permissions:", err)
 		return err
 	}
 	// Write the data into the file
 	_, err = file.Write(tomlData)
 	if err != nil {
-		fmt.Println("Error writing to the file:", err)
+		fmt.Fprintln(os.Stderr, "Error writing to the file:", err)
 		return err
 	}
 	return err

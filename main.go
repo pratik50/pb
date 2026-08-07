@@ -54,8 +54,7 @@ var cli = &cobra.Command{
 	PersistentPreRunE: analyticsPreRun,
 	RunE: func(command *cobra.Command, _ []string) error {
 		if p, _ := command.Flags().GetBool(versionFlag); p {
-			pb.PrintVersion(Version, Commit)
-			return nil
+			return pb.PrintVersion(Version, Commit)
 		}
 		if rootOutputFormat == "json" {
 			return printCommandJSON(command)
@@ -290,10 +289,12 @@ func main() {
 	cli.AddCommand(pb.CloudCmd)
 	cli.AddCommand(pb.LogoutCmd)
 	cli.AddCommand(pb.StatusCmd)
+	cli.AddCommand(pb.AgentCmd)
 
 	// Set as command
-	pb.VersionCmd.Run = func(_ *cobra.Command, _ []string) {
-		pb.PrintVersion(Version, Commit)
+	pb.VersionCmd.Run = nil
+	pb.VersionCmd.RunE = func(_ *cobra.Command, _ []string) error {
+		return pb.PrintVersion(Version, Commit)
 	}
 
 	cli.AddCommand(pb.VersionCmd)
@@ -304,11 +305,62 @@ func main() {
 	cli.SetHelpFunc(renderRootHelp)
 
 	cli.CompletionOptions.HiddenDefaultCmd = true
+	structuredErrors := requestsJSONOutput(os.Args[1:])
+	cli.SilenceErrors = structuredErrors
+	cli.SilenceUsage = structuredErrors
 
-	err := cli.Execute()
+	executed, err := cli.ExecuteC()
 	if err != nil {
+		if structuredErrors {
+			if renderErr := renderExecutionError(executed, err); renderErr != nil {
+				fmt.Fprintf(executed.ErrOrStderr(), "Error: %v\n", renderErr)
+			}
+		}
 		os.Exit(1)
 	}
+}
+
+func requestsJSONOutput(args []string) bool {
+	for index, arg := range args {
+		lower := strings.ToLower(strings.TrimSpace(arg))
+		if lower == "--" {
+			break
+		}
+		switch lower {
+		case "--output=json", "-o=json", "-ojson":
+			return true
+		case "--output", "-o":
+			if index+1 < len(args) && strings.EqualFold(strings.TrimSpace(args[index+1]), "json") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func renderExecutionError(command *cobra.Command, err error) error {
+	if err == nil || pb.ErrorWasRendered(err) {
+		return nil
+	}
+	if executionOutputFormat(command) == "json" {
+		return pb.WriteErrorJSON(command.ErrOrStderr(), err)
+	}
+	_, writeErr := fmt.Fprintf(command.ErrOrStderr(), "Error: %v\n", err)
+	return writeErr
+}
+
+func executionOutputFormat(command *cobra.Command) string {
+	if command == nil {
+		return "text"
+	}
+	flag := command.Flags().Lookup("output")
+	if flag == nil {
+		flag = command.InheritedFlags().Lookup("output")
+	}
+	if flag == nil {
+		return "text"
+	}
+	return strings.ToLower(strings.TrimSpace(flag.Value.String()))
 }
 
 type jsonCommand struct {

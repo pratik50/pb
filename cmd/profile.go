@@ -17,7 +17,6 @@ package cmd
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -124,7 +123,7 @@ var AddProfileCmd = &cobra.Command{
 			return err
 		}
 		if strings.TrimSpace(profileAPIKey) != "" && len(args) != 2 {
-			return errors.New("--api-key cannot be combined with username/password")
+			return newCLIError(ErrorInvalidInput, "--api-key cannot be combined with username/password", nil)
 		}
 		return cobra.MaximumNArgs(4)(cmd, args)
 	},
@@ -219,10 +218,9 @@ var RemoveProfileCmd = &cobra.Command{
 
 		_, exists := fileConfig.Profiles[name]
 		if !exists {
-			msg := fmt.Sprintf("No profile found with the name: %s", name)
-			cmd.Annotations["error"] = msg
-			fmt.Println(msg)
-			return nil
+			commandErr := newCLIError(ErrorNotFound, fmt.Sprintf("no profile found with the name: %s", name), nil)
+			cmd.Annotations["error"] = commandErr.Error()
+			return commandErr
 		}
 
 		wasDefault := fileConfig.DefaultProfile == name
@@ -306,7 +304,7 @@ var DefaultProfileCmd = &cobra.Command{
 		if !exists {
 			commandError := fmt.Sprintf("profile %s does not exist", name)
 			cmd.Annotations["error"] = commandError
-			return errors.New(commandError)
+			return newCLIError(ErrorNotFound, commandError, nil)
 		}
 
 		fileConfig.DefaultProfile = name
@@ -382,6 +380,10 @@ var ListProfileCmd = &cobra.Command{
 			cmd.Annotations = make(map[string]string)
 		}
 		startTime := time.Now()
+		format, err := validateOutputFormat(outputFormat)
+		if err != nil {
+			return err
+		}
 
 		fileConfig, err := config.ReadConfigFromFile()
 		if err != nil {
@@ -389,8 +391,8 @@ var ListProfileCmd = &cobra.Command{
 			return err
 		}
 
-		if outputFormat == "json" {
-			commandError := outputResult(safeProfilesOutput(fileConfig.Profiles))
+		if format == outputJSON {
+			commandError := writeJSON(cmd.OutOrStdout(), safeProfilesOutput(fileConfig.Profiles))
 			cmd.Annotations["executionTime"] = time.Since(startTime).String()
 			if commandError != nil {
 				cmd.Annotations["error"] = commandError.Error()

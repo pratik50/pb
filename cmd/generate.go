@@ -75,9 +75,11 @@ var GenerateSchemaCmd = &cobra.Command{
 
 		// Check for non-200 status codes
 		if resp.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(resp.Body)
-			fmt.Printf(common.Red+"Error response: %s\n"+common.Reset, string(body))
-			return fmt.Errorf(common.Red+"non-200 status code received: %s"+common.Reset, resp.Status)
+			body, readErr := io.ReadAll(resp.Body)
+			if readErr != nil {
+				return fmt.Errorf("failed to read schema detection error response: %w", readErr)
+			}
+			return responseStatusError("detect schema", resp.StatusCode, resp.Status, body)
 		}
 
 		// Parse and print the response
@@ -152,9 +154,11 @@ var CreateSchemaCmd = &cobra.Command{
 
 		// Check for non-200 status codes
 		if resp.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(resp.Body)
-			fmt.Printf(common.Red+"Error response: %s\n"+common.Reset, string(body))
-			return fmt.Errorf(common.Red+"non-200 status code received: %s"+common.Reset, resp.Status)
+			body, readErr := io.ReadAll(resp.Body)
+			if readErr != nil {
+				return fmt.Errorf("failed to read schema creation error response: %w", readErr)
+			}
+			return responseStatusError("create schema", resp.StatusCode, resp.Status, body)
 		}
 
 		// Parse and print the response

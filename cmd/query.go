@@ -76,9 +76,8 @@ var query = &cobra.Command{
 		}
 
 		if (len(args) == 0 || strings.TrimSpace(args[0]) == "") && !interactive {
-			fmt.Println("Please enter your query")
-			fmt.Printf("Example:\n  pb sql run \"select * from frontend\" --from=10m --to=now\n")
-			return nil
+			message := "SQL query is required; example: pb sql run \"select * from frontend\" --from=10m --to=now"
+			return newCLIError(ErrorInvalidInput, message, nil)
 		}
 
 		var sqlQuery string
@@ -128,7 +127,7 @@ var query = &cobra.Command{
 			return err
 		}
 
-		outputFmt, err := command.Flags().GetString("output")
+		outputFmt, err := commandOutputFormat(command)
 		if err != nil {
 			command.Annotations["error"] = err.Error()
 			return fmt.Errorf("failed to get 'output' flag: %w", err)
@@ -488,9 +487,8 @@ var SaveSQLCmd = &cobra.Command{
 
 		sqlQuery := strings.TrimSpace(args[0])
 		if sqlQuery == "" {
-			fmt.Println("Please enter your query")
-			fmt.Printf("Example:\n  pb sql save \"select * from frontend\"\n")
-			return nil
+			message := "SQL query is required; example: pb sql save \"select * from frontend\""
+			return newCLIError(ErrorInvalidInput, message, nil)
 		}
 
 		start, err := command.Flags().GetString(startFlag)
@@ -732,9 +730,11 @@ func fetchData(client *internalHTTP.HTTPClient, query string, startTime, endTime
 			return fmt.Errorf("failed to read error response body: %w", err)
 		}
 		if preview == "" {
-			return fmt.Errorf("query failed: server returned %s with an empty response body", resp.Status)
+			message := fmt.Sprintf("query failed: server returned %s with an empty response body", resp.Status)
+			return httpStatusCLIError(resp.StatusCode, message, fmt.Sprintf("query failed: server returned %s", resp.Status))
 		}
-		return fmt.Errorf("query failed: server returned %s: %s", resp.Status, preview)
+		legacyMessage := fmt.Sprintf("query failed: server returned %s: %s", resp.Status, preview)
+		return httpStatusCLIError(resp.StatusCode, legacyMessage, fmt.Sprintf("query failed: server returned %s", resp.Status))
 	}
 
 	reader := bufio.NewReader(resp.Body)
@@ -996,7 +996,8 @@ func saveFilter(client *internalHTTP.HTTPClient, sqlQuery, name, startTime, endT
 
 	if resp.StatusCode != 200 {
 		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("server returned %s: %s", resp.Status, strings.TrimSpace(string(b)))
+		legacyMessage := fmt.Sprintf("server returned %s: %s", resp.Status, strings.TrimSpace(string(b)))
+		return httpStatusCLIError(resp.StatusCode, legacyMessage, fmt.Sprintf("server returned %s", resp.Status))
 	}
 	return nil
 }

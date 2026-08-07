@@ -16,8 +16,8 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/parseablehq/pb/pkg/analytics"
@@ -31,7 +31,7 @@ var VersionCmd = &cobra.Command{
 	Short:   "Print version",
 	Long:    "Print version and commit information",
 	Example: "  pb version",
-	Run: func(cmd *cobra.Command, _ []string) {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		if cmd.Annotations == nil {
 			cmd.Annotations = make(map[string]string)
 		}
@@ -46,6 +46,7 @@ var VersionCmd = &cobra.Command{
 		if err != nil {
 			cmd.Annotations["error"] = err.Error()
 		}
+		return err
 	},
 }
 
@@ -55,6 +56,10 @@ func init() {
 
 // PrintVersion prints version information
 func PrintVersion(version, commit string) error {
+	format, err := validateOutputFormat(outputFormat)
+	if err != nil {
+		return err
+	}
 	client := internalHTTP.DefaultClient(&DefaultProfile)
 
 	// Fetch server information
@@ -68,7 +73,7 @@ func PrintVersion(version, commit string) error {
 	}
 
 	// Output as JSON if specified
-	if outputFormat == "json" {
+	if format == outputJSON {
 		versionInfo := map[string]interface{}{
 			"client": map[string]string{
 				"version": version,
@@ -80,12 +85,7 @@ func PrintVersion(version, commit string) error {
 				"commit":  about.Commit,
 			},
 		}
-		jsonData, err := json.MarshalIndent(versionInfo, "", "  ")
-		if err != nil {
-			return fmt.Errorf("error generating JSON output: %w", err)
-		}
-		fmt.Println(string(jsonData))
-		return nil
+		return writeJSON(os.Stdout, versionInfo)
 	}
 
 	// Default: Output as text

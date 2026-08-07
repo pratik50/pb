@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -88,8 +89,9 @@ var AddRoleCmd = &cobra.Command{
 		}
 
 		if slices.Contains(roles, name) {
-			fmt.Println("role already exists, please use a different name")
-			return nil
+			commandErr := newCLIError(ErrorConflict, fmt.Sprintf("role %s already exists; use a different name", name), nil)
+			cmd.Annotations["errors"] = commandErr.Error()
+			return commandErr
 		}
 
 		_m, err := tea.NewProgram(role.New()).Run()
@@ -132,15 +134,12 @@ var AddRoleCmd = &cobra.Command{
 			cmd.Annotations["errors"] = fmt.Sprintf("Error reading response: %s", err.Error())
 			return err
 		}
-		body := string(bodyBytes)
-
-		if resp.StatusCode == 200 {
-			fmt.Printf("Added role %s", name)
-		} else {
-			cmd.Annotations["errors"] = fmt.Sprintf("Request failed - Status: %s, Response: %s", resp.Status, body)
-			fmt.Printf("Request Failed\nStatus Code: %s\nResponse: %s\n", resp.Status, body)
+		if resp.StatusCode != http.StatusOK {
+			requestErr := responseStatusError("create role", resp.StatusCode, resp.Status, bodyBytes)
+			cmd.Annotations["errors"] = requestErr.Error()
+			return requestErr
 		}
-
+		fmt.Printf("Added role %s", name)
 		return nil
 	},
 }
@@ -167,9 +166,9 @@ var RemoveRoleCmd = &cobra.Command{
 			return err
 		}
 		if !slices.Contains(roles, name) {
-			fmt.Println(missingRoleMessage(name, roles))
-			cmd.Annotations["errors"] = fmt.Sprintf("role %s does not exist", name)
-			return nil
+			commandErr := fmt.Errorf("%s", missingRoleMessage(name, roles))
+			cmd.Annotations["errors"] = commandErr.Error()
+			return commandErr
 		}
 
 		req, err := client.NewRequest("DELETE", "role/"+name, nil)
@@ -185,19 +184,17 @@ var RemoveRoleCmd = &cobra.Command{
 		}
 		defer resp.Body.Close()
 
-		if resp.StatusCode == 200 {
-			fmt.Printf("Removed role %s\n", StyleBold.Render(name))
-		} else {
+		if resp.StatusCode != http.StatusOK {
 			bodyBytes, err := io.ReadAll(resp.Body)
 			if err != nil {
 				cmd.Annotations["errors"] = fmt.Sprintf("Error reading response: %s", err.Error())
 				return err
 			}
-			body := string(bodyBytes)
-			cmd.Annotations["errors"] = fmt.Sprintf("Request failed - Status: %s, Response: %s", resp.Status, body)
-			fmt.Printf("Request Failed\nStatus Code: %s\nResponse: %s\n", resp.Status, body)
+			requestErr := responseStatusError("delete role", resp.StatusCode, resp.Status, bodyBytes)
+			cmd.Annotations["errors"] = requestErr.Error()
+			return requestErr
 		}
-
+		fmt.Printf("Removed role %s\n", StyleBold.Render(name))
 		return nil
 	},
 }
@@ -223,7 +220,7 @@ var ListRoleCmd = &cobra.Command{
 			return err
 		}
 
-		outputFormat, err := cmd.Flags().GetString("output")
+		outputFormat, err := commandOutputFormat(cmd)
 		if err != nil {
 			cmd.Annotations["errors"] = fmt.Sprintf("Error retrieving output flag: %s", err.Error())
 			return err
@@ -243,24 +240,6 @@ var ListRoleCmd = &cobra.Command{
 			}(idx, role)
 		}
 		wg.Wait()
-
-		if outputFormat == "json" {
-			allRoles := map[string][]RoleData{}
-			for idx, roleName := range roles {
-				if roleResponses[idx].err == nil {
-					allRoles[roleName] = roleResponses[idx].data
-				}
-			}
-			jsonOutput, err := json.MarshalIndent(allRoles, "", "  ")
-			if err != nil {
-				cmd.Annotations["errors"] = fmt.Sprintf("Error marshaling JSON output: %s", err.Error())
-				return fmt.Errorf("failed to marshal JSON output: %w", err)
-			}
-			fmt.Println(string(jsonOutput))
-			return nil
-		}
-
-		printRoleTable(roles, roleResponses)
 		var fetchErrors []string
 		for idx, roleName := range roles {
 			if roleResponses[idx].err != nil {
@@ -269,11 +248,26 @@ var ListRoleCmd = &cobra.Command{
 				cmd.Annotations["errors"] += errMsg + "\n"
 			}
 		}
+		var detailsErr error
 		if len(fetchErrors) > 0 {
-			return fmt.Errorf("failed to fetch details for %d role(s): %s", len(fetchErrors), strings.Join(fetchErrors, "; "))
+			detailsErr = fmt.Errorf("failed to fetch details for %d role(s): %s", len(fetchErrors), strings.Join(fetchErrors, "; "))
 		}
 
-		return nil
+		if outputFormat == outputJSON {
+			allRoles := map[string][]RoleData{}
+			for idx, roleName := range roles {
+				if roleResponses[idx].err == nil {
+					allRoles[roleName] = roleResponses[idx].data
+				}
+			}
+			if err := writeJSON(cmd.OutOrStdout(), allRoles); err != nil {
+				return err
+			}
+			return detailsErr
+		}
+
+		printRoleTable(roles, roleResponses)
+		return detailsErr
 	},
 }
 
@@ -459,7 +453,8 @@ func fetchRoles(client *internalHTTP.HTTPClient, data *[]string) error {
 		}
 	} else {
 		body := string(bytes)
-		return fmt.Errorf("request failed\nstatus code: %s\nresponse: %s", resp.Status, body)
+		legacyMessage := fmt.Sprintf("request failed\nstatus code: %s\nresponse: %s", resp.Status, body)
+		return httpStatusCLIError(resp.StatusCode, legacyMessage, fmt.Sprintf("request failed: %s", resp.Status))
 	}
 
 	return nil
@@ -492,7 +487,8 @@ func fetchSpecificRole(client *internalHTTP.HTTPClient, role string) (res []Role
 		res = wrapper.Actions
 	} else {
 		body := string(bytes)
-		err = fmt.Errorf("request failed\nstatus code: %s\nresponse: %s", resp.Status, body)
+		legacyMessage := fmt.Sprintf("request failed\nstatus code: %s\nresponse: %s", resp.Status, body)
+		err = httpStatusCLIError(resp.StatusCode, legacyMessage, fmt.Sprintf("request failed: %s", resp.Status))
 		return
 	}
 

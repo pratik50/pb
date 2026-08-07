@@ -17,7 +17,6 @@
 package cmd
 
 import (
-	"errors"
 	"os"
 
 	"github.com/parseablehq/pb/pkg/config"
@@ -35,13 +34,13 @@ func PreRunDefaultProfile(_ *cobra.Command, _ []string) error {
 func PreRun() error {
 	conf, err := config.ReadConfigFromFile()
 	if os.IsNotExist(err) {
-		return errors.New("no profile configured. run: pb login")
+		return newCLIError(ErrorNotFound, "no profile configured. run: pb login", nil)
 	} else if err != nil {
 		return err
 	}
 
 	if conf.Profiles == nil || conf.DefaultProfile == "" {
-		return errors.New("no profile configured. run: pb login")
+		return newCLIError(ErrorNotFound, "no profile configured. run: pb login", nil)
 	}
 
 	DefaultProfile = conf.Profiles[conf.DefaultProfile]
