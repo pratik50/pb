@@ -45,6 +45,10 @@ func (err httpStatusError) Error() string {
 	return fmt.Sprintf("HTTP %d: %s", err.statusCode, strings.TrimSpace(err.body))
 }
 
+func (err httpStatusError) HTTPStatusCode() int {
+	return err.statusCode
+}
+
 func FetchHomeDatasets(profile config.Profile) ([]Dataset, error) {
 	return fetchPrismHomeDatasets(profile)
 }

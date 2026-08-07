@@ -74,9 +74,9 @@ var addUser = &cobra.Command{
 
 		name := args[0]
 		if DefaultProfile.Cloud {
-			fmt.Println(cloudAddUserMessage())
-			cmd.Annotations["error"] = "user creation is not supported for cloud profiles"
-			return nil
+			commandErr := newCLIError(ErrorInvalidInput, cloudAddUserMessage(), nil)
+			cmd.Annotations["error"] = commandErr.Error()
+			return commandErr
 		}
 
 		client := internalHTTP.DefaultClient(&DefaultProfile)
@@ -89,9 +89,9 @@ var addUser = &cobra.Command{
 		if slices.ContainsFunc(users, func(user UserData) bool {
 			return user.ID == name
 		}) {
-			fmt.Println("user already exists")
-			cmd.Annotations["error"] = "user already exists"
-			return nil
+			commandErr := newCLIError(ErrorConflict, fmt.Sprintf("user %s already exists", name), nil)
+			cmd.Annotations["error"] = commandErr.Error()
+			return commandErr
 		}
 
 		// fetch all the roles to be applied to this user
@@ -102,9 +102,9 @@ var addUser = &cobra.Command{
 			return err
 		}
 		if rolesToSet == "" {
-			fmt.Println(selfHostedAddUserRoleMessage(name, rolesOnServer))
-			cmd.Annotations["error"] = "at least one role is required"
-			return nil
+			commandErr := newCLIError(ErrorInvalidInput, selfHostedAddUserRoleMessage(name, rolesOnServer), nil)
+			cmd.Annotations["error"] = commandErr.Error()
+			return commandErr
 		}
 		rolesToSetArr := strings.Split(rolesToSet, ",")
 
@@ -112,9 +112,10 @@ var addUser = &cobra.Command{
 		for idx, role := range rolesToSetArr {
 			rolesToSetArr[idx] = strings.TrimSpace(role)
 			if !slices.Contains(rolesOnServer, rolesToSetArr[idx]) {
-				fmt.Printf("role %s doesn't exist. Create it first with `pb role add %s`, or use an existing role with `pb user add %s --role <role>`\n", rolesToSetArr[idx], rolesToSetArr[idx], name)
-				cmd.Annotations["error"] = fmt.Sprintf("role %s doesn't exist", rolesToSetArr[idx])
-				return nil
+				message := fmt.Sprintf("role %s doesn't exist; create it first with `pb role add %s`, or use an existing role with `pb user add %s --role <role>`", rolesToSetArr[idx], rolesToSetArr[idx], name)
+				commandErr := newCLIError(ErrorNotFound, message, nil)
+				cmd.Annotations["error"] = commandErr.Error()
+				return commandErr
 			}
 		}
 
@@ -132,23 +133,20 @@ var addUser = &cobra.Command{
 			cmd.Annotations["error"] = err.Error()
 			return err
 		}
+		defer resp.Body.Close()
 
-		bytes, err := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			cmd.Annotations["error"] = err.Error()
 			return err
 		}
-		body := string(bytes)
-		defer resp.Body.Close()
-
-		if resp.StatusCode == 200 {
-			fmt.Printf("Added user: %s \nPassword is: %s\nRole(s) assigned: %s\n", name, body, rolesToSet)
-			cmd.Annotations["error"] = "none"
-		} else {
-			fmt.Printf("Request Failed\nStatus Code: %s\nResponse: %s\n", resp.Status, body)
-			cmd.Annotations["error"] = fmt.Sprintf("request failed with status code %s", resp.Status)
+		if resp.StatusCode != http.StatusOK {
+			requestErr := responseStatusError("create user", resp.StatusCode, resp.Status, body)
+			cmd.Annotations["error"] = requestErr.Error()
+			return requestErr
 		}
-
+		fmt.Printf("Added user: %s \nPassword is: %s\nRole(s) assigned: %s\n", name, string(body), rolesToSet)
+		cmd.Annotations["error"] = "none"
 		return nil
 	},
 }
@@ -184,16 +182,19 @@ var RemoveUserCmd = &cobra.Command{
 			cmd.Annotations["error"] = err.Error()
 			return err
 		}
+		defer resp.Body.Close()
 
-		if resp.StatusCode == 200 {
-			fmt.Printf("Removed user %s\n", StyleBold.Render(name))
-			cmd.Annotations["error"] = "none"
-		} else {
-			body, _ := io.ReadAll(resp.Body)
-			fmt.Printf("Request Failed\nStatus Code: %s\nResponse: %s\n", resp.Status, string(body))
-			cmd.Annotations["error"] = fmt.Sprintf("request failed with status code %s", resp.Status)
+		if resp.StatusCode != http.StatusOK {
+			body, readErr := io.ReadAll(resp.Body)
+			if readErr != nil {
+				return readErr
+			}
+			requestErr := responseStatusError("delete user", resp.StatusCode, resp.Status, body)
+			cmd.Annotations["error"] = requestErr.Error()
+			return requestErr
 		}
-
+		fmt.Printf("Removed user %s\n", StyleBold.Render(name))
+		cmd.Annotations["error"] = "none"
 		return nil
 	},
 }
@@ -227,9 +228,9 @@ var SetUserRoleCmd = &cobra.Command{
 		if !slices.ContainsFunc(users, func(user UserData) bool {
 			return user.ID == name
 		}) {
-			fmt.Println(missingUserMessage(name, DefaultProfile.Cloud))
-			cmd.Annotations["error"] = "user does not exist"
-			return nil
+			commandErr := newCLIError(ErrorNotFound, missingUserMessage(name, DefaultProfile.Cloud), nil)
+			cmd.Annotations["error"] = commandErr.Error()
+			return commandErr
 		}
 
 		rolesToSet := args[1]
@@ -242,9 +243,10 @@ var SetUserRoleCmd = &cobra.Command{
 		for idx, role := range rolesToSetArr {
 			rolesToSetArr[idx] = strings.TrimSpace(role)
 			if !slices.Contains(rolesOnServer, rolesToSetArr[idx]) {
-				fmt.Printf("role %s doesn't exist, please create a role using `pb role add %s`\n", rolesToSetArr[idx], rolesToSetArr[idx])
-				cmd.Annotations["error"] = fmt.Sprintf("role %s doesn't exist", rolesToSetArr[idx])
-				return nil
+				message := fmt.Sprintf("role %s doesn't exist; create it using `pb role add %s`", rolesToSetArr[idx], rolesToSetArr[idx])
+				commandErr := newCLIError(ErrorNotFound, message, nil)
+				cmd.Annotations["error"] = commandErr.Error()
+				return commandErr
 			}
 		}
 
@@ -259,23 +261,20 @@ var SetUserRoleCmd = &cobra.Command{
 			cmd.Annotations["error"] = err.Error()
 			return err
 		}
+		defer resp.Body.Close()
 
-		bytes, err := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			cmd.Annotations["error"] = err.Error()
 			return err
 		}
-		body := string(bytes)
-		defer resp.Body.Close()
-
-		if resp.StatusCode == 200 {
-			fmt.Printf("Added role(s) %s to user %s\n", rolesToSet, name)
-			cmd.Annotations["error"] = "none"
-		} else {
-			fmt.Printf("Request Failed\nStatus Code: %s\nResponse: %s\n", resp.Status, body)
-			cmd.Annotations["error"] = fmt.Sprintf("request failed with status code %s", resp.Status)
+		if resp.StatusCode != http.StatusOK {
+			requestErr := responseStatusError("set user roles", resp.StatusCode, resp.Status, body)
+			cmd.Annotations["error"] = requestErr.Error()
+			return requestErr
 		}
-
+		fmt.Printf("Added role(s) %s to user %s\n", rolesToSet, name)
+		cmd.Annotations["error"] = "none"
 		return nil
 	},
 }
@@ -359,32 +358,28 @@ var ListUserCmd = &cobra.Command{
 
 		wsg.Wait()
 
-		outputFormat, err := cmd.Flags().GetString("output")
+		outputFormat, err := commandOutputFormat(cmd)
 		if err != nil {
 			cmd.Annotations["error"] = err.Error()
 			return err
 		}
 
-		if outputFormat == "json" {
+		if outputFormat == outputJSON {
+			if err := userRoleFetchError(cmd, users, roleResponses); err != nil {
+				return err
+			}
 			usersWithRoles := make([]map[string]interface{}, len(users))
 			for idx, user := range users {
 				usersWithRoles[idx] = map[string]interface{}{
 					"id":    user.ID,
-					"roles": roleResponses[idx].data,
+					"roles": nonNilSlice(roleResponses[idx].data),
 				}
 			}
-			jsonOutput, err := json.MarshalIndent(usersWithRoles, "", "  ")
-			if err != nil {
+			if err := writeJSON(cmd.OutOrStdout(), usersWithRoles); err != nil {
 				cmd.Annotations["error"] = err.Error()
-				return fmt.Errorf("failed to marshal JSON output: %w", err)
+				return err
 			}
-			fmt.Println(string(jsonOutput))
-			return userRoleFetchError(cmd, users, roleResponses)
-		}
-
-		if outputFormat == "text" {
-			printUserRoleTable(users, roleResponses)
-			return userRoleFetchError(cmd, users, roleResponses)
+			return nil
 		}
 
 		printUserRoleTable(users, roleResponses)
@@ -525,7 +520,8 @@ func fetchUsers(client *internalHTTP.HTTPClient) (res []UserData, err error) {
 		}
 	} else {
 		body := string(bytes)
-		err = fmt.Errorf("request failed\nstatus code: %s\nresponse: %s", resp.Status, body)
+		legacyMessage := fmt.Sprintf("request failed\nstatus code: %s\nresponse: %s", resp.Status, body)
+		err = httpStatusCLIError(resp.StatusCode, legacyMessage, fmt.Sprintf("request failed: %s", resp.Status))
 		return
 	}
 
@@ -541,11 +537,15 @@ func fetchUserRoles(client *internalHTTP.HTTPClient, user string) (res UserRoles
 	if err != nil {
 		return
 	}
+	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return
 	}
-	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		err = responseStatusError("fetch user roles", resp.StatusCode, resp.Status, body)
+		return
+	}
 
 	err = json.Unmarshal(body, &res)
 	return

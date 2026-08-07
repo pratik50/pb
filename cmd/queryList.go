@@ -19,9 +19,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
+	"os"
 	"strings"
 
-	"github.com/parseablehq/pb/pkg/config"
 	internalHTTP "github.com/parseablehq/pb/pkg/http"
 	"github.com/parseablehq/pb/pkg/model"
 	"github.com/spf13/cobra"
@@ -35,64 +36,45 @@ var SavedQueryList = &cobra.Command{
 	Long:         "\nShow the list of saved queries for active user",
 	SilenceUsage: true,
 	PreRunE:      PreRunDefaultProfile,
-	RunE: func(_ *cobra.Command, _ []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		client := internalHTTP.DefaultClient(&DefaultProfile)
 
 		// Check if the output flag is set
 		if outputFlag != "" {
-			// Display all filters if output flag is set
-			userConfig, err := config.ReadConfigFromFile()
+			format, err := validateOutputFormat(outputFlag)
 			if err != nil {
-				fmt.Println("Error reading Default Profile")
+				return err
 			}
-			var userProfile config.Profile
-			if profile, ok := userConfig.Profiles[userConfig.DefaultProfile]; ok {
-				userProfile = profile
+			userSavedQueries, err := fetchFilters(&client)
+			if err != nil {
+				return err
 			}
 
-			client := internalHTTP.DefaultClient(&userProfile)
-			userSavedQueries := fetchFilters(&client)
-			// Collect all filter titles in a slice and join with commas
-			var filterDetails []string
-
-			if outputFlag == "json" {
-				// If JSON output is requested, marshal the saved queries to JSON
-				jsonOutput, err := json.MarshalIndent(userSavedQueries, "", "  ")
-				if err != nil {
-					fmt.Println("Error converting saved queries to JSON:", err)
-					return err
-				}
-				if string(jsonOutput) == "null" {
-					fmt.Println("[]")
-					return nil
-				}
-				fmt.Println(string(jsonOutput))
-			} else {
-				for _, query := range userSavedQueries {
-					// Build the line conditionally
-					var parts []string
-					if query.Title != "" {
-						parts = append(parts, query.Title)
-					}
-					if query.Stream != "" {
-						parts = append(parts, query.Stream)
-					}
-					if query.Desc != "" {
-						parts = append(parts, query.Desc)
-					}
-					if query.From != "" {
-						parts = append(parts, query.From)
-					}
-					if query.To != "" {
-						parts = append(parts, query.To)
-					}
-
-					// Join parts with commas and print each query on a new line
-					fmt.Println(strings.Join(parts, ", "))
-				}
+			if format == outputJSON {
+				return writeJSON(cmd.OutOrStdout(), userSavedQueries)
 			}
-			// Print all titles as a single line, comma-separated
-			fmt.Println(strings.Join(filterDetails, " "))
+			for _, query := range userSavedQueries {
+				// Build the line conditionally
+				var parts []string
+				if query.Title != "" {
+					parts = append(parts, query.Title)
+				}
+				if query.Stream != "" {
+					parts = append(parts, query.Stream)
+				}
+				if query.Desc != "" {
+					parts = append(parts, query.Desc)
+				}
+				if query.From != "" {
+					parts = append(parts, query.From)
+				}
+				if query.To != "" {
+					parts = append(parts, query.To)
+				}
+
+				// Join parts with commas and print each query on a new line
+				fmt.Println(strings.Join(parts, ", "))
+			}
 			return nil
 
 		}
@@ -111,30 +93,38 @@ var SavedQueryList = &cobra.Command{
 			}
 		}
 		if d.SavedQueryID() != "" {
-			deleteSavedQuery(&client, d.SavedQueryID(), d.Title())
+			if err := deleteSavedQuery(&client, d.SavedQueryID(), d.Title()); err != nil {
+				return err
+			}
 		}
 		return nil
 	},
 }
 
 // Delete a saved query from the list.
-func deleteSavedQuery(client *internalHTTP.HTTPClient, savedQueryID, title string) {
-	fmt.Printf("\nAttempting to delete '%s'", title)
+func deleteSavedQuery(client *internalHTTP.HTTPClient, savedQueryID, title string) error {
+	fmt.Fprintf(os.Stderr, "\nAttempting to delete '%s'", title)
 	deleteURL := `filters/` + savedQueryID
 	req, err := client.NewRequest("DELETE", deleteURL, nil)
 	if err != nil {
-		fmt.Println("Failed to delete the saved query with error: ", err)
+		return fmt.Errorf("failed to create saved-query delete request: %w", err)
 	}
 
 	resp, err := client.Client.Do(req)
 	if err != nil {
-		return
+		return fmt.Errorf("failed to delete saved query: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 200 {
-		fmt.Printf("\nSaved Query deleted\n\n")
+	if resp.StatusCode != http.StatusOK {
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return fmt.Errorf("failed to read saved-query delete response: %w", readErr)
+		}
+		return responseStatusError("delete saved query", resp.StatusCode, resp.Status, body)
 	}
+	fmt.Printf("\nSaved Query deleted\n\n")
+	return nil
 }
 
 // Convert a saved query to executable SQL query and print results to terminal.
@@ -178,35 +168,34 @@ type Item struct {
 	To     string `json:"to,omitempty"`
 }
 
-func fetchFilters(client *internalHTTP.HTTPClient) []Item {
+func fetchFilters(client *internalHTTP.HTTPClient) ([]Item, error) {
 	req, err := client.NewRequest("GET", "filters", nil)
 	if err != nil {
-		fmt.Println("Error creating request:", err)
-		return nil
+		return nil, fmt.Errorf("failed to create saved-query request: %w", err)
 	}
 
 	resp, err := client.Client.Do(req)
 	if err != nil {
-		fmt.Println("Error making request:", err)
-		return nil
+		return nil, fmt.Errorf("failed to fetch saved queries: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Println("Error reading response body:", err)
-		return nil
+		return nil, fmt.Errorf("failed to read saved-query response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		legacyMessage := fmt.Sprintf("failed to fetch saved queries: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		return nil, httpStatusCLIError(resp.StatusCode, legacyMessage, fmt.Sprintf("failed to fetch saved queries: %s", resp.Status))
 	}
 
 	var filters []model.Filter
-	err = json.Unmarshal(body, &filters)
-	if err != nil {
-		fmt.Println("Error unmarshalling response:", err)
-		return nil
+	if err := json.Unmarshal(body, &filters); err != nil {
+		return nil, fmt.Errorf("failed to decode saved-query response: %w", err)
 	}
 
 	// This returns only the SQL type filters
-	var userSavedQueries []Item
+	userSavedQueries := make([]Item, 0, len(filters))
 	for _, filter := range filters {
 		if filter.Query.FilterQuery == nil {
 			continue
@@ -221,5 +210,5 @@ func fetchFilters(client *internalHTTP.HTTPClient) []Item {
 		}
 		userSavedQueries = append(userSavedQueries, userSavedQuery)
 	}
-	return userSavedQueries
+	return userSavedQueries, nil
 }

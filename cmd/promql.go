@@ -212,17 +212,29 @@ func promqlGet(path string, params url.Values) ([]byte, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	return io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, responseStatusError("PromQL request", resp.StatusCode, resp.Status, body)
+	}
+	var envelope struct {
+		Status    string `json:"status"`
+		Error     string `json:"error,omitempty"`
+		ErrorType string `json:"errorType,omitempty"`
+	}
+	if json.Unmarshal(body, &envelope) == nil && envelope.Status == "error" {
+		if envelope.ErrorType != "" {
+			return nil, fmt.Errorf("PromQL error (%s): %s", envelope.ErrorType, envelope.Error)
+		}
+		return nil, fmt.Errorf("PromQL error: %s", envelope.Error)
+	}
+	return body, nil
 }
 
-func printRawJSON(body []byte) {
-	var v interface{}
-	if json.Unmarshal(body, &v) == nil {
-		b, _ := json.MarshalIndent(v, "", "  ")
-		fmt.Println(string(b))
-	} else {
-		fmt.Println(string(body))
-	}
+func printRawJSON(cmd *cobra.Command, body []byte) error {
+	return writeRawJSON(cmd.OutOrStdout(), body)
 }
 
 func optionalTimeParam(params url.Values, cmd *cobra.Command, flagName, paramName string) {
@@ -279,7 +291,10 @@ func runPromqlQuery(cmd *cobra.Command, args []string) error {
 	fromStr, _ := cmd.Flags().GetString("from")
 	toStr, _ := cmd.Flags().GetString("to")
 	step, _ := cmd.Flags().GetString("step")
-	outputFmt, _ := cmd.Flags().GetString("output")
+	outputFmt, err := commandOutputFormat(cmd)
+	if err != nil {
+		return err
+	}
 	instant, _ := cmd.Flags().GetBool("instant")
 	interactive, _ := cmd.Flags().GetBool("interactive")
 	fromStr = promqlInteractiveFromDefault(fromStr, interactive, cmd.Flags().Changed("from"))
@@ -301,9 +316,8 @@ func runPromqlQuery(cmd *cobra.Command, args []string) error {
 	}
 
 	if strings.TrimSpace(expr) == "" {
-		fmt.Println("Please enter a PromQL expression")
-		fmt.Printf("Example:\n  pb promql run \"http_requests_total\" --dataset otel_metrics\n  pb promql run -i\n")
-		return nil
+		message := "PromQL expression is required; example: pb promql run \"http_requests_total\" --dataset otel_metrics"
+		return newCLIError(ErrorInvalidInput, message, nil)
 	}
 
 	params := url.Values{}
@@ -331,14 +345,12 @@ func runPromqlQuery(cmd *cobra.Command, args []string) error {
 	}
 
 	if outputFmt == "json" {
-		printRawJSON(body)
-		return nil
+		return printRawJSON(cmd, body)
 	}
 
 	var result promqlResponse
 	if err := json.Unmarshal(body, &result); err != nil {
-		fmt.Println(string(body))
-		return nil
+		return newInvalidResponseError(fmt.Errorf("failed to decode PromQL response: %w", err))
 	}
 	if result.Status == "error" {
 		return fmt.Errorf("query error (%s): %s", result.ErrorType, result.Error)
@@ -390,7 +402,10 @@ var promqlLabelsCmd = &cobra.Command{
 		if len(args) > 0 {
 			stream = args[0]
 		}
-		outputFmt, _ := cmd.Flags().GetString("output")
+		outputFmt, err := commandOutputFormat(cmd)
+		if err != nil {
+			return err
+		}
 
 		params := url.Values{}
 		params.Set("stream", stream)
@@ -402,8 +417,7 @@ var promqlLabelsCmd = &cobra.Command{
 			return err
 		}
 		if outputFmt == "json" {
-			printRawJSON(body)
-			return nil
+			return printRawJSON(cmd, body)
 		}
 
 		var resp struct {
@@ -412,8 +426,7 @@ var promqlLabelsCmd = &cobra.Command{
 			Error  string   `json:"error,omitempty"`
 		}
 		if err := json.Unmarshal(body, &resp); err != nil {
-			fmt.Println(string(body))
-			return nil
+			return newInvalidResponseError(fmt.Errorf("failed to decode PromQL labels response: %w", err))
 		}
 		if resp.Status == "error" {
 			return fmt.Errorf("%s", resp.Error)
@@ -445,7 +458,10 @@ var promqlLabelValuesCmd = &cobra.Command{
 		if len(args) > 1 {
 			stream = args[1]
 		}
-		outputFmt, _ := cmd.Flags().GetString("output")
+		outputFmt, err := commandOutputFormat(cmd)
+		if err != nil {
+			return err
+		}
 
 		params := url.Values{}
 		params.Set("stream", stream)
@@ -457,8 +473,7 @@ var promqlLabelValuesCmd = &cobra.Command{
 			return err
 		}
 		if outputFmt == "json" {
-			printRawJSON(body)
-			return nil
+			return printRawJSON(cmd, body)
 		}
 
 		var resp struct {
@@ -467,8 +482,7 @@ var promqlLabelValuesCmd = &cobra.Command{
 			Error  string   `json:"error,omitempty"`
 		}
 		if err := json.Unmarshal(body, &resp); err != nil {
-			fmt.Println(string(body))
-			return nil
+			return newInvalidResponseError(fmt.Errorf("failed to decode PromQL label-values response: %w", err))
 		}
 		if resp.Status == "error" {
 			return fmt.Errorf("%s", resp.Error)
@@ -501,10 +515,13 @@ var promqlSeriesCmd = &cobra.Command{
 			stream = args[0]
 		}
 		matchers, _ := cmd.Flags().GetStringArray("match")
-		outputFmt, _ := cmd.Flags().GetString("output")
+		outputFmt, err := commandOutputFormat(cmd)
+		if err != nil {
+			return err
+		}
 
 		if len(matchers) == 0 {
-			return fmt.Errorf("at least one --match selector is required")
+			return newCLIError(ErrorInvalidInput, "at least one --match selector is required", nil)
 		}
 
 		params := url.Values{}
@@ -520,8 +537,7 @@ var promqlSeriesCmd = &cobra.Command{
 			return err
 		}
 		if outputFmt == "json" {
-			printRawJSON(body)
-			return nil
+			return printRawJSON(cmd, body)
 		}
 
 		var resp struct {
@@ -530,8 +546,7 @@ var promqlSeriesCmd = &cobra.Command{
 			Error  string              `json:"error,omitempty"`
 		}
 		if err := json.Unmarshal(body, &resp); err != nil {
-			fmt.Println(string(body))
-			return nil
+			return newInvalidResponseError(fmt.Errorf("failed to decode PromQL series response: %w", err))
 		}
 		if resp.Status == "error" {
 			return fmt.Errorf("%s", resp.Error)
@@ -578,7 +593,10 @@ var promqlCardinalityLabelNamesCmd = &cobra.Command{
 		lookback, _ := cmd.Flags().GetInt("lookback")
 		limit, _ := cmd.Flags().GetInt("limit")
 		selector, _ := cmd.Flags().GetString("selector")
-		outputFmt, _ := cmd.Flags().GetString("output")
+		outputFmt, err := commandOutputFormat(cmd)
+		if err != nil {
+			return err
+		}
 
 		params := url.Values{}
 		params.Set("stream", stream)
@@ -593,8 +611,7 @@ var promqlCardinalityLabelNamesCmd = &cobra.Command{
 			return err
 		}
 		if outputFmt == "json" {
-			printRawJSON(body)
-			return nil
+			return printRawJSON(cmd, body)
 		}
 
 		var resp struct {
@@ -603,8 +620,7 @@ var promqlCardinalityLabelNamesCmd = &cobra.Command{
 			Error  string             `json:"error,omitempty"`
 		}
 		if err := json.Unmarshal(body, &resp); err != nil {
-			fmt.Println(string(body))
-			return nil
+			return newInvalidResponseError(fmt.Errorf("failed to decode PromQL cardinality response: %w", err))
 		}
 		if resp.Status == "error" {
 			return fmt.Errorf("%s", resp.Error)
@@ -632,7 +648,10 @@ var promqlCardinalityLabelValuesCmd = &cobra.Command{
 		}
 		lookback, _ := cmd.Flags().GetInt("lookback")
 		limit, _ := cmd.Flags().GetInt("limit")
-		outputFmt, _ := cmd.Flags().GetString("output")
+		outputFmt, err := commandOutputFormat(cmd)
+		if err != nil {
+			return err
+		}
 
 		params := url.Values{}
 		params.Set("stream", stream)
@@ -647,8 +666,7 @@ var promqlCardinalityLabelValuesCmd = &cobra.Command{
 			return err
 		}
 		if outputFmt == "json" {
-			printRawJSON(body)
-			return nil
+			return printRawJSON(cmd, body)
 		}
 
 		var resp struct {
@@ -657,8 +675,7 @@ var promqlCardinalityLabelValuesCmd = &cobra.Command{
 			Error  string             `json:"error,omitempty"`
 		}
 		if err := json.Unmarshal(body, &resp); err != nil {
-			fmt.Println(string(body))
-			return nil
+			return newInvalidResponseError(fmt.Errorf("failed to decode PromQL cardinality response: %w", err))
 		}
 		if resp.Status == "error" {
 			return fmt.Errorf("%s", resp.Error)
@@ -729,7 +746,10 @@ var promqlCardinalityActiveSeriesCmd = &cobra.Command{
 		if len(args) > 1 {
 			selector = args[1]
 		}
-		outputFmt, _ := cmd.Flags().GetString("output")
+		outputFmt, err := commandOutputFormat(cmd)
+		if err != nil {
+			return err
+		}
 
 		params := url.Values{}
 		params.Set("stream", stream)
@@ -744,8 +764,7 @@ var promqlCardinalityActiveSeriesCmd = &cobra.Command{
 			return err
 		}
 		if outputFmt == "json" {
-			printRawJSON(body)
-			return nil
+			return printRawJSON(cmd, body)
 		}
 
 		var resp struct {
@@ -757,8 +776,7 @@ var promqlCardinalityActiveSeriesCmd = &cobra.Command{
 			Error string `json:"error,omitempty"`
 		}
 		if err := json.Unmarshal(body, &resp); err != nil {
-			fmt.Println(string(body))
-			return nil
+			return newInvalidResponseError(fmt.Errorf("failed to decode PromQL active-series response: %w", err))
 		}
 		if resp.Status == "error" {
 			return fmt.Errorf("%s", resp.Error)
@@ -789,15 +807,17 @@ var promqlActiveQueriesCmd = &cobra.Command{
 	Args:    cobra.NoArgs,
 	PreRunE: PreRunDefaultProfile,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		outputFmt, _ := cmd.Flags().GetString("output")
+		outputFmt, err := commandOutputFormat(cmd)
+		if err != nil {
+			return err
+		}
 
 		body, err := promqlGet("prometheus/api/v1/status/active_queries", nil)
 		if err != nil {
 			return err
 		}
 		if outputFmt == "json" {
-			printRawJSON(body)
-			return nil
+			return printRawJSON(cmd, body)
 		}
 
 		var resp struct {
@@ -811,8 +831,7 @@ var promqlActiveQueriesCmd = &cobra.Command{
 			Error string `json:"error,omitempty"`
 		}
 		if err := json.Unmarshal(body, &resp); err != nil {
-			printRawJSON(body)
-			return nil
+			return newInvalidResponseError(fmt.Errorf("failed to decode PromQL active-queries response: %w", err))
 		}
 		if resp.Status == "error" {
 			return fmt.Errorf("%s", resp.Error)
@@ -852,7 +871,10 @@ var promqlTSDBCmd = &cobra.Command{
 		topN, _ := cmd.Flags().GetInt("top")
 		date, _ := cmd.Flags().GetString("date")
 		focusLabel, _ := cmd.Flags().GetString("focus-label")
-		outputFmt, _ := cmd.Flags().GetString("output")
+		outputFmt, err := commandOutputFormat(cmd)
+		if err != nil {
+			return err
+		}
 
 		params := url.Values{}
 		params.Set("stream", stream)
@@ -869,8 +891,7 @@ var promqlTSDBCmd = &cobra.Command{
 			return err
 		}
 		if outputFmt == "json" {
-			printRawJSON(body)
-			return nil
+			return printRawJSON(cmd, body)
 		}
 
 		var envelope struct {
@@ -879,8 +900,7 @@ var promqlTSDBCmd = &cobra.Command{
 			Error  string          `json:"error,omitempty"`
 		}
 		if err := json.Unmarshal(body, &envelope); err != nil {
-			fmt.Println(string(body))
-			return nil
+			return newInvalidResponseError(fmt.Errorf("failed to decode PromQL TSDB response: %w", err))
 		}
 		if envelope.Status == "error" {
 			return fmt.Errorf("%s", envelope.Error)
@@ -899,8 +919,7 @@ var promqlTSDBCmd = &cobra.Command{
 			LabelValueCount      []cardinalityEntry `json:"labelValueCountByLabelName"`
 		}
 		if err := json.Unmarshal(envelope.Data, &data); err != nil {
-			fmt.Println(string(body))
-			return nil
+			return newInvalidResponseError(fmt.Errorf("failed to decode PromQL TSDB data: %w", err))
 		}
 
 		d := data

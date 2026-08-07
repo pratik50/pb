@@ -208,8 +208,9 @@ var CloudProfileAddCmd = &cobra.Command{
 		if apiKey == "" {
 			return errors.New("api key is required. pass --api-key")
 		}
-		if cloudOutputFormat != "text" && cloudOutputFormat != "json" {
-			return fmt.Errorf("unsupported output format %q (expected text or json)", cloudOutputFormat)
+		outputFormat, err := validateOutputFormat(cloudOutputFormat)
+		if err != nil {
+			return err
 		}
 
 		orchestratorURL := cloudOrchestratorEndpoint()
@@ -235,7 +236,7 @@ var CloudProfileAddCmd = &cobra.Command{
 			return err
 		}
 
-		if cloudOutputFormat == "json" {
+		if outputFormat == "json" {
 			return json.NewEncoder(cmd.OutOrStdout()).Encode(cloudProfileAddOutput{
 				Status:  "success",
 				Name:    profileName,

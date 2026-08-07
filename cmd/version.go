@@ -16,7 +16,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -31,7 +30,7 @@ var VersionCmd = &cobra.Command{
 	Short:   "Print version",
 	Long:    "Print version and commit information",
 	Example: "  pb version",
-	Run: func(cmd *cobra.Command, _ []string) {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		if cmd.Annotations == nil {
 			cmd.Annotations = make(map[string]string)
 		}
@@ -42,19 +41,24 @@ var VersionCmd = &cobra.Command{
 			cmd.Annotations["executionTime"] = time.Since(startTime).String()
 		}()
 
-		err := PrintVersion("1.0.0", "abc123") // Replace with actual version and commit values
+		err := PrintVersion(cmd, "1.0.0", "abc123") // Replace with actual version and commit values
 		if err != nil {
 			cmd.Annotations["error"] = err.Error()
 		}
+		return err
 	},
 }
 
 func init() {
-	VersionCmd.Flags().StringVarP(&outputFormat, "output", "o", "text", "Output format (text|json)")
+	VersionCmd.Flags().StringP("output", "o", "text", "Output format (text|json)")
 }
 
 // PrintVersion prints version information
-func PrintVersion(version, commit string) error {
+func PrintVersion(cmd *cobra.Command, version, commit string) error {
+	format, err := commandOutputFormat(cmd)
+	if err != nil {
+		return err
+	}
 	client := internalHTTP.DefaultClient(&DefaultProfile)
 
 	// Fetch server information
@@ -68,7 +72,7 @@ func PrintVersion(version, commit string) error {
 	}
 
 	// Output as JSON if specified
-	if outputFormat == "json" {
+	if format == outputJSON {
 		versionInfo := map[string]interface{}{
 			"client": map[string]string{
 				"version": version,
@@ -80,22 +84,18 @@ func PrintVersion(version, commit string) error {
 				"commit":  about.Commit,
 			},
 		}
-		jsonData, err := json.MarshalIndent(versionInfo, "", "  ")
-		if err != nil {
-			return fmt.Errorf("error generating JSON output: %w", err)
-		}
-		fmt.Println(string(jsonData))
-		return nil
+		return writeJSON(cmd.OutOrStdout(), versionInfo)
 	}
 
 	// Default: Output as text
-	fmt.Printf("\n%s \n", StandardStyleAlt.Render("pb version"))
-	fmt.Printf("- %s %s\n", StandardStyleBold.Render("version: "), version)
-	fmt.Printf("- %s %s\n\n", StandardStyleBold.Render("commit:  "), commit)
+	out := cmd.OutOrStdout()
+	fmt.Fprintf(out, "\n%s \n", StandardStyleAlt.Render("pb version"))
+	fmt.Fprintf(out, "- %s %s\n", StandardStyleBold.Render("version: "), version)
+	fmt.Fprintf(out, "- %s %s\n\n", StandardStyleBold.Render("commit:  "), commit)
 
-	fmt.Printf("%s %s \n", StandardStyleAlt.Render("Connected to"), StandardStyleBold.Render(DefaultProfile.URL))
-	fmt.Printf("- %s %s\n", StandardStyleBold.Render("version: "), about.Version)
-	fmt.Printf("- %s %s\n\n", StandardStyleBold.Render("commit:  "), about.Commit)
+	fmt.Fprintf(out, "%s %s \n", StandardStyleAlt.Render("Connected to"), StandardStyleBold.Render(DefaultProfile.URL))
+	fmt.Fprintf(out, "- %s %s\n", StandardStyleBold.Render("version: "), about.Version)
+	fmt.Fprintf(out, "- %s %s\n\n", StandardStyleBold.Render("commit:  "), about.Commit)
 
 	return nil
 }

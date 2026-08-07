@@ -82,6 +82,14 @@ type Analytics struct {
 	ClarityTag string `json:"clarityTag"`
 }
 
+type httpStatusError struct {
+	statusCode int
+	message    string
+}
+
+func (err httpStatusError) Error() string       { return err.message }
+func (err httpStatusError) HTTPStatusCode() int { return err.statusCode }
+
 type Command struct {
 	Name      string            `json:"name"`
 	Arguments []string          `json:"arguments"`
@@ -97,7 +105,7 @@ type Config struct {
 func CheckAndCreateULID(_ *cobra.Command, _ []string) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		fmt.Printf("could not find home directory: %v\n", err)
+		fmt.Fprintf(os.Stderr, "could not find home directory: %v\n", err)
 		return err
 	}
 
@@ -107,7 +115,7 @@ func CheckAndCreateULID(_ *cobra.Command, _ []string) error {
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		// Create the directory if needed
 		if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
-			fmt.Printf("could not create config directory: %v\n", err)
+			fmt.Fprintf(os.Stderr, "could not create config directory: %v\n", err)
 			return err
 		}
 	}
@@ -118,7 +126,7 @@ func CheckAndCreateULID(_ *cobra.Command, _ []string) error {
 	if err == nil {
 		// If the file exists, unmarshal the content
 		if err := yaml.Unmarshal(data, &config); err != nil {
-			fmt.Printf("could not parse config file: %v\n", err)
+			fmt.Fprintf(os.Stderr, "could not parse config file: %v\n", err)
 			return err
 		}
 	}
@@ -132,13 +140,13 @@ func CheckAndCreateULID(_ *cobra.Command, _ []string) error {
 
 		newData, err := yaml.Marshal(&config)
 		if err != nil {
-			fmt.Printf("could not marshal config data: %v\n", err)
+			fmt.Fprintf(os.Stderr, "could not marshal config data: %v\n", err)
 			return err
 		}
 
 		// Write updated config with ULID back to the file
 		if err := os.WriteFile(configPath, newData, 0o644); err != nil {
-			fmt.Printf("could not write to config file: %v\n", err)
+			fmt.Fprintf(os.Stderr, "could not write to config file: %v\n", err)
 			return err
 		}
 		// fmt.Printf("Generated and saved new ULID: %s\n", config.ULID)
@@ -356,7 +364,7 @@ func FetchAbout(client *internalHTTP.HTTPClient) (about About, err error) {
 	} else {
 		body := string(bytes)
 		body = fmt.Sprintf("Request Failed\nStatus Code: %s\nResponse: %s\n", resp.Status, body)
-		err = errors.New(body)
+		err = httpStatusError{statusCode: resp.StatusCode, message: body}
 	}
 	return
 }

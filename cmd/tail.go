@@ -50,12 +50,9 @@ var TailCmd = &cobra.Command{
 	Args:    cobra.ExactArgs(1),
 	PreRunE: PreRunDefaultProfile,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		output, err := cmd.Flags().GetString("output")
+		output, err := commandOutputFormat(cmd)
 		if err != nil {
 			return err
-		}
-		if output != "text" && output != "json" {
-			return fmt.Errorf("unsupported output format %q (expected text or json)", output)
 		}
 		name := args[0]
 		profile := DefaultProfile

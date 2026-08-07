@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/parseablehq/pb/pkg/config"
@@ -275,7 +276,7 @@ func (m modelSavedQueries) View() string {
 func SavedQueriesMenu() *tea.Program {
 	userConfig, err := config.ReadConfigFromFile()
 	if err != nil {
-		fmt.Println("Error reading Default Profile")
+		fmt.Fprintln(os.Stderr, "Error reading Default Profile")
 	}
 	var userProfile config.Profile
 	if profile, ok := userConfig.Profiles[userConfig.DefaultProfile]; ok {
@@ -298,27 +299,27 @@ func SavedQueriesMenu() *tea.Program {
 func fetchFilters(client *internalHTTP.HTTPClient) []list.Item {
 	req, err := client.NewRequest("GET", "filters", nil)
 	if err != nil {
-		fmt.Println("Error creating request:", err)
+		fmt.Fprintln(os.Stderr, "Error creating request:", err)
 		return nil
 	}
 
 	resp, err := client.Client.Do(req)
 	if err != nil {
-		fmt.Println("Error making request:", err)
+		fmt.Fprintln(os.Stderr, "Error making request:", err)
 		return nil
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Println("Error reading response body:", err)
+		fmt.Fprintln(os.Stderr, "Error reading response body:", err)
 		return nil
 	}
 
 	var filters []Filter
 	err = json.Unmarshal(body, &filters)
 	if err != nil {
-		fmt.Println("Error unmarshalling response:", err)
+		fmt.Fprintln(os.Stderr, "Error unmarshalling response:", err)
 		return nil
 	}
 

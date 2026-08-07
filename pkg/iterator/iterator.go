@@ -17,6 +17,7 @@
 package iterator
 
 import (
+	"sync"
 	"time"
 )
 
@@ -26,6 +27,7 @@ type MinuteCheckPoint struct {
 }
 
 type QueryIterator[OK any, ERR any] struct {
+	mu             *sync.RWMutex
 	rangeStartTime time.Time
 	rangeEndTime   time.Time
 	ascending      bool
@@ -39,6 +41,7 @@ type QueryIterator[OK any, ERR any] struct {
 
 func NewQueryIterator[OK any, ERR any](startTime time.Time, endTime time.Time, ascending bool, queryRunner func(time.Time, time.Time) (OK, ERR), hasData func(time.Time, time.Time) bool) QueryIterator[OK, ERR] {
 	iter := QueryIterator[OK, ERR]{
+		mu:             &sync.RWMutex{},
 		rangeStartTime: startTime,
 		rangeEndTime:   endTime,
 		ascending:      ascending,
@@ -58,18 +61,27 @@ func (iter *QueryIterator[OK, ERR]) inRange(targetTime time.Time) bool {
 }
 
 func (iter *QueryIterator[OK, ERR]) Ready() bool {
+	iter.mu.RLock()
+	defer iter.mu.RUnlock()
 	return iter.ready
 }
 
 func (iter *QueryIterator[OK, ERR]) Finished() bool {
+	iter.mu.RLock()
+	defer iter.mu.RUnlock()
 	return iter.finished && iter.index == len(iter.windows)-1
 }
 
 func (iter *QueryIterator[OK, ERR]) CanFetchPrev() bool {
+	iter.mu.RLock()
+	defer iter.mu.RUnlock()
 	return iter.index > 0
 }
 
 func (iter *QueryIterator[OK, ERR]) populateNextNonEmpty() {
+	iter.mu.Lock()
+	defer iter.mu.Unlock()
+
 	var inspectMinute MinuteCheckPoint
 
 	// this is initial condition when no checkpoint exists in the window
@@ -102,20 +114,27 @@ func (iter *QueryIterator[OK, ERR]) populateNextNonEmpty() {
 
 func (iter *QueryIterator[OK, ERR]) Next() (OK, ERR) {
 	// This assumes that there is always a next index to fetch if this function is called
+	iter.mu.Lock()
 	iter.index++
 	currentMinute := iter.windows[iter.index]
-	if iter.index == len(iter.windows)-1 {
+	populateNext := iter.index == len(iter.windows)-1
+	if populateNext {
 		iter.ready = false
+	}
+	iter.mu.Unlock()
+	if populateNext {
 		go iter.populateNextNonEmpty()
 	}
 	return iter.queryRunner(currentMinute.time, currentMinute.time.Add(time.Minute))
 }
 
 func (iter *QueryIterator[OK, ERR]) Prev() (OK, ERR) {
+	iter.mu.Lock()
 	if iter.index > 0 {
 		iter.index--
 	}
 	currentMinute := iter.windows[iter.index]
+	iter.mu.Unlock()
 	return iter.queryRunner(currentMinute.time, currentMinute.time.Add(time.Minute))
 }
 

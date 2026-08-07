@@ -181,21 +181,16 @@ func WriteConfigToFile(config *Config) error {
 
 	file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
-		fmt.Println("Error creating the file:", err)
-		return err
+		return fmt.Errorf("create config file: %w", err)
 	}
 	defer file.Close()
 	if err := file.Chmod(0o600); err != nil {
-		fmt.Println("Error setting file permissions:", err)
-		return err
+		return fmt.Errorf("set config file permissions: %w", err)
 	}
-	// Write the data into the file
-	_, err = file.Write(tomlData)
-	if err != nil {
-		fmt.Println("Error writing to the file:", err)
-		return err
+	if _, err := file.Write(tomlData); err != nil {
+		return fmt.Errorf("write config file: %w", err)
 	}
-	return err
+	return nil
 }
 
 // ReadConfigFromFile reads the configuration from the config file

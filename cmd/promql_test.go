@@ -1,10 +1,12 @@
 package cmd
 
 import (
+	"bytes"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/parseablehq/pb/pkg/config"
@@ -15,6 +17,34 @@ func TestPromqlInteractiveFromDefaultUsesTenMinutes(t *testing.T) {
 	got := promqlInteractiveFromDefault("5m", true, false)
 	if got != "10m" {
 		t.Fatalf("got %q, want 10m", got)
+	}
+}
+
+func TestPromqlJSONReturnsErrorForServerFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		fmt.Fprint(w, `{"status":"error","errorType":"bad_data","error":"invalid selector"}`)
+	}))
+	defer server.Close()
+
+	originalProfile := DefaultProfile
+	DefaultProfile = config.Profile{URL: server.URL, APIKey: "test-key"}
+	t.Cleanup(func() { DefaultProfile = originalProfile })
+	if err := promqlLabelsCmd.Flags().Set("output", "json"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = promqlLabelsCmd.Flags().Set("output", "text") })
+	var stdout bytes.Buffer
+	promqlLabelsCmd.SetOut(&stdout)
+	t.Cleanup(func() { promqlLabelsCmd.SetOut(nil) })
+
+	err := promqlLabelsCmd.RunE(promqlLabelsCmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "422 Unprocessable Entity") {
+		t.Fatalf("expected PromQL server error, got %v", err)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("unexpected JSON output on failure: %q", stdout.String())
 	}
 }
 
