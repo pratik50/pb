@@ -166,7 +166,7 @@ var RemoveRoleCmd = &cobra.Command{
 			return err
 		}
 		if !slices.Contains(roles, name) {
-			commandErr := fmt.Errorf("%s", missingRoleMessage(name, roles))
+			commandErr := newCLIError(ErrorNotFound, missingRoleMessage(name, roles), nil)
 			cmd.Annotations["errors"] = commandErr.Error()
 			return commandErr
 		}
@@ -254,6 +254,9 @@ var ListRoleCmd = &cobra.Command{
 		}
 
 		if outputFormat == outputJSON {
+			if detailsErr != nil {
+				return detailsErr
+			}
 			allRoles := map[string][]RoleData{}
 			for idx, roleName := range roles {
 				if roleResponses[idx].err == nil {
@@ -263,7 +266,7 @@ var ListRoleCmd = &cobra.Command{
 			if err := writeJSON(cmd.OutOrStdout(), allRoles); err != nil {
 				return err
 			}
-			return detailsErr
+			return nil
 		}
 
 		printRoleTable(roles, roleResponses)

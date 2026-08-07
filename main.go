@@ -54,7 +54,7 @@ var cli = &cobra.Command{
 	PersistentPreRunE: analyticsPreRun,
 	RunE: func(command *cobra.Command, _ []string) error {
 		if p, _ := command.Flags().GetBool(versionFlag); p {
-			return pb.PrintVersion(Version, Commit)
+			return pb.PrintVersion(command, Version, Commit)
 		}
 		output, err := normalizeOutputFormat(rootOutputFormat)
 		if err != nil {
@@ -294,8 +294,8 @@ func main() {
 
 	// Set as command
 	pb.VersionCmd.Run = nil
-	pb.VersionCmd.RunE = func(_ *cobra.Command, _ []string) error {
-		return pb.PrintVersion(Version, Commit)
+	pb.VersionCmd.RunE = func(command *cobra.Command, _ []string) error {
+		return pb.PrintVersion(command, Version, Commit)
 	}
 
 	cli.AddCommand(pb.VersionCmd)

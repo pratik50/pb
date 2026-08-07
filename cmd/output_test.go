@@ -47,8 +47,12 @@ func TestWriteRawJSONProducesOneValidJSONDocument(t *testing.T) {
 func TestWriteRawJSONRejectsMalformedOrMultipleDocuments(t *testing.T) {
 	for _, body := range []string{`not-json`, `{} {}`} {
 		var output bytes.Buffer
-		if err := writeRawJSON(&output, []byte(body)); err == nil {
+		err := writeRawJSON(&output, []byte(body))
+		if err == nil {
 			t.Fatalf("expected error for %q", body)
+		}
+		if detail := errorDetails(err); detail.Code != ErrorInvalidResponse || detail.Retryable {
+			t.Fatalf("unexpected malformed-response classification for %q: %+v", body, detail)
 		}
 		if output.Len() != 0 {
 			t.Fatalf("unexpected partial output for %q: %q", body, output.String())

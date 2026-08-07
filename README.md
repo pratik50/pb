@@ -343,8 +343,8 @@ pb -o json
 pb help dataset list -o json
 ```
 
-The agent catalog contains only read-only commands. It also records arguments,
-flags, required permissions, and safety constraints. Server-side permissions
+The agent catalog contains only read-only commands. It records command strings,
+scope, profile requirements, and safety constraints. Server-side permissions
 remain authoritative.
 
 Commands that support `-o json` return structured output:

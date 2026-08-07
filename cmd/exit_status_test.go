@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 	"strings"
@@ -72,6 +73,138 @@ func TestRemoveRoleReturnsErrorForServerFailure(t *testing.T) {
 	err := RemoveRoleCmd.RunE(RemoveRoleCmd, []string{"reader"})
 	if err == nil || !strings.Contains(err.Error(), "delete role failed: 403 Forbidden") {
 		t.Fatalf("expected server failure, got %v", err)
+	}
+}
+
+func TestRemoveRoleMissingReturnsNotFound(t *testing.T) {
+	useCommandTransport(t, func(*http.Request) (*http.Response, error) {
+		return commandHTTPResponse(http.StatusOK, "200 OK", `{"reader":[]}`), nil
+	})
+
+	err := RemoveRoleCmd.RunE(RemoveRoleCmd, []string{"missing"})
+	if err == nil {
+		t.Fatal("expected missing role error")
+	}
+	if detail := errorDetails(err); detail.Code != ErrorNotFound {
+		t.Fatalf("unexpected missing-role classification: %+v", detail)
+	}
+}
+
+func TestAddUserMissingRoleReturnsNotFound(t *testing.T) {
+	useCommandTransport(t, func(req *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(req.URL.Path, "/user") {
+			return commandHTTPResponse(http.StatusOK, "200 OK", `[]`), nil
+		}
+		return commandHTTPResponse(http.StatusOK, "200 OK", `{"reader":[]}`), nil
+	})
+	role := AddUserCmd.Flags().Lookup(roleFlag)
+	previousRole := role.Value.String()
+	previousRoleChanged := role.Changed
+	t.Cleanup(func() {
+		_ = role.Value.Set(previousRole)
+		role.Changed = previousRoleChanged
+	})
+	if err := AddUserCmd.Flags().Set(roleFlag, "missing"); err != nil {
+		t.Fatal(err)
+	}
+
+	err := AddUserCmd.RunE(AddUserCmd, []string{"alice"})
+	if err == nil {
+		t.Fatal("expected missing role error")
+	}
+	if detail := errorDetails(err); detail.Code != ErrorNotFound {
+		t.Fatalf("unexpected missing-role classification: %+v", detail)
+	}
+}
+
+func TestSetUserRoleMissingUserReturnsNotFound(t *testing.T) {
+	useCommandTransport(t, func(*http.Request) (*http.Response, error) {
+		return commandHTTPResponse(http.StatusOK, "200 OK", `[{"id":"bob","method":"native"}]`), nil
+	})
+
+	err := SetUserRoleCmd.RunE(SetUserRoleCmd, []string{"alice", "reader"})
+	if err == nil {
+		t.Fatal("expected missing user error")
+	}
+	if detail := errorDetails(err); detail.Code != ErrorNotFound {
+		t.Fatalf("unexpected missing-user classification: %+v", detail)
+	}
+}
+
+func TestSetUserRoleMissingRoleReturnsNotFound(t *testing.T) {
+	useCommandTransport(t, func(req *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(req.URL.Path, "/user") {
+			return commandHTTPResponse(http.StatusOK, "200 OK", `[{"id":"alice","method":"native"}]`), nil
+		}
+		return commandHTTPResponse(http.StatusOK, "200 OK", `{"reader":[]}`), nil
+	})
+
+	err := SetUserRoleCmd.RunE(SetUserRoleCmd, []string{"alice", "missing"})
+	if err == nil {
+		t.Fatal("expected missing role error")
+	}
+	if detail := errorDetails(err); detail.Code != ErrorNotFound {
+		t.Fatalf("unexpected missing-role classification: %+v", detail)
+	}
+}
+
+func TestListUserJSONDoesNotWritePartialResult(t *testing.T) {
+	useCommandTransport(t, func(req *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(req.URL.Path, "/user/alice/role") {
+			return commandHTTPResponse(http.StatusInternalServerError, "500 Internal Server Error", "unavailable"), nil
+		}
+		return commandHTTPResponse(http.StatusOK, "200 OK", `[{"id":"alice","method":"native"}]`), nil
+	})
+	output := ListUserCmd.Flags().Lookup("output")
+	previousOutput := output.Value.String()
+	previousOutputChanged := output.Changed
+	var stdout bytes.Buffer
+	ListUserCmd.SetOut(&stdout)
+	t.Cleanup(func() {
+		_ = output.Value.Set(previousOutput)
+		output.Changed = previousOutputChanged
+		ListUserCmd.SetOut(nil)
+	})
+	if err := ListUserCmd.Flags().Set("output", "json"); err != nil {
+		t.Fatal(err)
+	}
+
+	err := ListUserCmd.RunE(ListUserCmd, nil)
+	if err == nil {
+		t.Fatal("expected role enrichment error")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("partial JSON written before error: %q", stdout.String())
+	}
+}
+
+func TestListRoleJSONDoesNotWritePartialResult(t *testing.T) {
+	useCommandTransport(t, func(req *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(req.URL.Path, "/role/reader") {
+			return commandHTTPResponse(http.StatusInternalServerError, "500 Internal Server Error", "unavailable"), nil
+		}
+		return commandHTTPResponse(http.StatusOK, "200 OK", `{"reader":[]}`), nil
+	})
+	output := ListRoleCmd.Flags().Lookup("output")
+	previousOutput := output.Value.String()
+	previousOutputChanged := output.Changed
+	var stdout bytes.Buffer
+	ListRoleCmd.SetOut(&stdout)
+	t.Cleanup(func() {
+		_ = output.Value.Set(previousOutput)
+		output.Changed = previousOutputChanged
+		ListRoleCmd.SetOut(nil)
+	})
+	if err := ListRoleCmd.Flags().Set("output", "json"); err != nil {
+		t.Fatal(err)
+	}
+
+	err := ListRoleCmd.RunE(ListRoleCmd, nil)
+	if err == nil {
+		t.Fatal("expected role detail error")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("partial JSON written before error: %q", stdout.String())
 	}
 }
 

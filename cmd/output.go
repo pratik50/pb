@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -50,14 +51,14 @@ func writeRawJSON(out io.Writer, body []byte) error {
 	decoder.UseNumber()
 	var value interface{}
 	if err := decoder.Decode(&value); err != nil {
-		return fmt.Errorf("server returned invalid JSON: %w", err)
+		return newInvalidResponseError(fmt.Errorf("server returned invalid JSON: %w", err))
 	}
 	var trailing interface{}
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		if err == nil {
-			return fmt.Errorf("server returned multiple JSON values")
+			return newInvalidResponseError(errors.New("server returned multiple JSON values"))
 		}
-		return fmt.Errorf("server returned invalid JSON: %w", err)
+		return newInvalidResponseError(fmt.Errorf("server returned invalid JSON: %w", err))
 	}
 	return writeJSON(out, value)
 }

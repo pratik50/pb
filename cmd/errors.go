@@ -59,6 +59,10 @@ func newCLIError(code ErrorCode, message string, cause error) *CLIError {
 	return &CLIError{Code: code, Message: message, PublicMessage: message, Cause: cause}
 }
 
+func newInvalidResponseError(err error) *CLIError {
+	return newCLIError(ErrorInvalidResponse, err.Error(), err)
+}
+
 type errorDetail struct {
 	Code       ErrorCode `json:"code"`
 	Message    string    `json:"message"`

@@ -17,7 +17,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/parseablehq/pb/pkg/analytics"
@@ -42,7 +41,7 @@ var VersionCmd = &cobra.Command{
 			cmd.Annotations["executionTime"] = time.Since(startTime).String()
 		}()
 
-		err := PrintVersion("1.0.0", "abc123") // Replace with actual version and commit values
+		err := PrintVersion(cmd, "1.0.0", "abc123") // Replace with actual version and commit values
 		if err != nil {
 			cmd.Annotations["error"] = err.Error()
 		}
@@ -51,12 +50,12 @@ var VersionCmd = &cobra.Command{
 }
 
 func init() {
-	VersionCmd.Flags().StringVarP(&outputFormat, "output", "o", "text", "Output format (text|json)")
+	VersionCmd.Flags().StringP("output", "o", "text", "Output format (text|json)")
 }
 
 // PrintVersion prints version information
-func PrintVersion(version, commit string) error {
-	format, err := validateOutputFormat(outputFormat)
+func PrintVersion(cmd *cobra.Command, version, commit string) error {
+	format, err := commandOutputFormat(cmd)
 	if err != nil {
 		return err
 	}
@@ -85,17 +84,18 @@ func PrintVersion(version, commit string) error {
 				"commit":  about.Commit,
 			},
 		}
-		return writeJSON(os.Stdout, versionInfo)
+		return writeJSON(cmd.OutOrStdout(), versionInfo)
 	}
 
 	// Default: Output as text
-	fmt.Printf("\n%s \n", StandardStyleAlt.Render("pb version"))
-	fmt.Printf("- %s %s\n", StandardStyleBold.Render("version: "), version)
-	fmt.Printf("- %s %s\n\n", StandardStyleBold.Render("commit:  "), commit)
+	out := cmd.OutOrStdout()
+	fmt.Fprintf(out, "\n%s \n", StandardStyleAlt.Render("pb version"))
+	fmt.Fprintf(out, "- %s %s\n", StandardStyleBold.Render("version: "), version)
+	fmt.Fprintf(out, "- %s %s\n\n", StandardStyleBold.Render("commit:  "), commit)
 
-	fmt.Printf("%s %s \n", StandardStyleAlt.Render("Connected to"), StandardStyleBold.Render(DefaultProfile.URL))
-	fmt.Printf("- %s %s\n", StandardStyleBold.Render("version: "), about.Version)
-	fmt.Printf("- %s %s\n\n", StandardStyleBold.Render("commit:  "), about.Commit)
+	fmt.Fprintf(out, "%s %s \n", StandardStyleAlt.Render("Connected to"), StandardStyleBold.Render(DefaultProfile.URL))
+	fmt.Fprintf(out, "- %s %s\n", StandardStyleBold.Render("version: "), about.Version)
+	fmt.Fprintf(out, "- %s %s\n\n", StandardStyleBold.Render("commit:  "), about.Commit)
 
 	return nil
 }

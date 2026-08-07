@@ -43,6 +43,10 @@ func PreRun() error {
 		return newCLIError(ErrorNotFound, "no profile configured. run: pb login", nil)
 	}
 
-	DefaultProfile = conf.Profiles[conf.DefaultProfile]
+	profile, ok := conf.Profiles[conf.DefaultProfile]
+	if !ok {
+		return newCLIError(ErrorNotFound, "no profile configured. run: pb login", nil)
+	}
+	DefaultProfile = profile
 	return nil
 }

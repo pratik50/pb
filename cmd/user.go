@@ -112,7 +112,8 @@ var addUser = &cobra.Command{
 		for idx, role := range rolesToSetArr {
 			rolesToSetArr[idx] = strings.TrimSpace(role)
 			if !slices.Contains(rolesOnServer, rolesToSetArr[idx]) {
-				commandErr := fmt.Errorf("role %s doesn't exist; create it first with `pb role add %s`, or use an existing role with `pb user add %s --role <role>`", rolesToSetArr[idx], rolesToSetArr[idx], name)
+				message := fmt.Sprintf("role %s doesn't exist; create it first with `pb role add %s`, or use an existing role with `pb user add %s --role <role>`", rolesToSetArr[idx], rolesToSetArr[idx], name)
+				commandErr := newCLIError(ErrorNotFound, message, nil)
 				cmd.Annotations["error"] = commandErr.Error()
 				return commandErr
 			}
@@ -227,7 +228,7 @@ var SetUserRoleCmd = &cobra.Command{
 		if !slices.ContainsFunc(users, func(user UserData) bool {
 			return user.ID == name
 		}) {
-			commandErr := fmt.Errorf("%s", missingUserMessage(name, DefaultProfile.Cloud))
+			commandErr := newCLIError(ErrorNotFound, missingUserMessage(name, DefaultProfile.Cloud), nil)
 			cmd.Annotations["error"] = commandErr.Error()
 			return commandErr
 		}
@@ -242,7 +243,8 @@ var SetUserRoleCmd = &cobra.Command{
 		for idx, role := range rolesToSetArr {
 			rolesToSetArr[idx] = strings.TrimSpace(role)
 			if !slices.Contains(rolesOnServer, rolesToSetArr[idx]) {
-				commandErr := fmt.Errorf("role %s doesn't exist; create it using `pb role add %s`", rolesToSetArr[idx], rolesToSetArr[idx])
+				message := fmt.Sprintf("role %s doesn't exist; create it using `pb role add %s`", rolesToSetArr[idx], rolesToSetArr[idx])
+				commandErr := newCLIError(ErrorNotFound, message, nil)
 				cmd.Annotations["error"] = commandErr.Error()
 				return commandErr
 			}
@@ -363,6 +365,9 @@ var ListUserCmd = &cobra.Command{
 		}
 
 		if outputFormat == outputJSON {
+			if err := userRoleFetchError(cmd, users, roleResponses); err != nil {
+				return err
+			}
 			usersWithRoles := make([]map[string]interface{}, len(users))
 			for idx, user := range users {
 				usersWithRoles[idx] = map[string]interface{}{
@@ -374,7 +379,7 @@ var ListUserCmd = &cobra.Command{
 				cmd.Annotations["error"] = err.Error()
 				return err
 			}
-			return userRoleFetchError(cmd, users, roleResponses)
+			return nil
 		}
 
 		printUserRoleTable(users, roleResponses)

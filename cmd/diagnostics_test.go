@@ -21,6 +21,13 @@ func TestSQLMissingQueryReturnsErrorWithoutStdout(t *testing.T) {
 		query.SetOut(nil)
 		query.SetErr(nil)
 	})
+	interactiveFlag := query.Flags().Lookup("interactive")
+	previousInteractive := interactiveFlag.Value.String()
+	previousInteractiveChanged := interactiveFlag.Changed
+	t.Cleanup(func() {
+		_ = interactiveFlag.Value.Set(previousInteractive)
+		interactiveFlag.Changed = previousInteractiveChanged
+	})
 	if err := query.Flags().Set("interactive", "false"); err != nil {
 		t.Fatal(err)
 	}
@@ -43,6 +50,13 @@ func TestPromqlMissingExpressionReturnsErrorWithoutStdout(t *testing.T) {
 	t.Cleanup(func() {
 		promqlRunCmd.SetOut(nil)
 		promqlRunCmd.SetErr(nil)
+	})
+	interactiveFlag := promqlRunCmd.Flags().Lookup("interactive")
+	previousInteractive := interactiveFlag.Value.String()
+	previousInteractiveChanged := interactiveFlag.Changed
+	t.Cleanup(func() {
+		_ = interactiveFlag.Value.Set(previousInteractive)
+		interactiveFlag.Changed = previousInteractiveChanged
 	})
 	if err := promqlRunCmd.Flags().Set("interactive", "false"); err != nil {
 		t.Fatal(err)
@@ -68,6 +82,13 @@ func TestPromqlDecodeFailureDoesNotWriteRawBodyToStdout(t *testing.T) {
 	originalProfile := DefaultProfile
 	DefaultProfile = config.Profile{URL: server.URL, APIKey: "test-key"}
 	t.Cleanup(func() { DefaultProfile = originalProfile })
+	outputFlag := promqlLabelsCmd.Flags().Lookup("output")
+	previousOutput := outputFlag.Value.String()
+	previousOutputChanged := outputFlag.Changed
+	t.Cleanup(func() {
+		_ = outputFlag.Value.Set(previousOutput)
+		outputFlag.Changed = previousOutputChanged
+	})
 	if err := promqlLabelsCmd.Flags().Set("output", "text"); err != nil {
 		t.Fatal(err)
 	}
@@ -88,6 +109,9 @@ func TestPromqlDecodeFailureDoesNotWriteRawBodyToStdout(t *testing.T) {
 	}
 	if commandErr == nil || !strings.Contains(commandErr.Error(), "failed to decode") {
 		t.Fatalf("expected decode error, got %v", commandErr)
+	}
+	if detail := errorDetails(commandErr); detail.Code != ErrorInvalidResponse || detail.Retryable {
+		t.Fatalf("unexpected decode-error classification: %+v", detail)
 	}
 	if len(output) != 0 {
 		t.Fatalf("raw response leaked to stdout: %q", output)

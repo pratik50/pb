@@ -350,7 +350,7 @@ func runPromqlQuery(cmd *cobra.Command, args []string) error {
 
 	var result promqlResponse
 	if err := json.Unmarshal(body, &result); err != nil {
-		return fmt.Errorf("failed to decode PromQL response: %w", err)
+		return newInvalidResponseError(fmt.Errorf("failed to decode PromQL response: %w", err))
 	}
 	if result.Status == "error" {
 		return fmt.Errorf("query error (%s): %s", result.ErrorType, result.Error)
@@ -426,7 +426,7 @@ var promqlLabelsCmd = &cobra.Command{
 			Error  string   `json:"error,omitempty"`
 		}
 		if err := json.Unmarshal(body, &resp); err != nil {
-			return fmt.Errorf("failed to decode PromQL labels response: %w", err)
+			return newInvalidResponseError(fmt.Errorf("failed to decode PromQL labels response: %w", err))
 		}
 		if resp.Status == "error" {
 			return fmt.Errorf("%s", resp.Error)
@@ -482,7 +482,7 @@ var promqlLabelValuesCmd = &cobra.Command{
 			Error  string   `json:"error,omitempty"`
 		}
 		if err := json.Unmarshal(body, &resp); err != nil {
-			return fmt.Errorf("failed to decode PromQL label-values response: %w", err)
+			return newInvalidResponseError(fmt.Errorf("failed to decode PromQL label-values response: %w", err))
 		}
 		if resp.Status == "error" {
 			return fmt.Errorf("%s", resp.Error)
@@ -546,7 +546,7 @@ var promqlSeriesCmd = &cobra.Command{
 			Error  string              `json:"error,omitempty"`
 		}
 		if err := json.Unmarshal(body, &resp); err != nil {
-			return fmt.Errorf("failed to decode PromQL series response: %w", err)
+			return newInvalidResponseError(fmt.Errorf("failed to decode PromQL series response: %w", err))
 		}
 		if resp.Status == "error" {
 			return fmt.Errorf("%s", resp.Error)
@@ -620,7 +620,7 @@ var promqlCardinalityLabelNamesCmd = &cobra.Command{
 			Error  string             `json:"error,omitempty"`
 		}
 		if err := json.Unmarshal(body, &resp); err != nil {
-			return fmt.Errorf("failed to decode PromQL cardinality response: %w", err)
+			return newInvalidResponseError(fmt.Errorf("failed to decode PromQL cardinality response: %w", err))
 		}
 		if resp.Status == "error" {
 			return fmt.Errorf("%s", resp.Error)
@@ -675,7 +675,7 @@ var promqlCardinalityLabelValuesCmd = &cobra.Command{
 			Error  string             `json:"error,omitempty"`
 		}
 		if err := json.Unmarshal(body, &resp); err != nil {
-			return fmt.Errorf("failed to decode PromQL cardinality response: %w", err)
+			return newInvalidResponseError(fmt.Errorf("failed to decode PromQL cardinality response: %w", err))
 		}
 		if resp.Status == "error" {
 			return fmt.Errorf("%s", resp.Error)
@@ -776,7 +776,7 @@ var promqlCardinalityActiveSeriesCmd = &cobra.Command{
 			Error string `json:"error,omitempty"`
 		}
 		if err := json.Unmarshal(body, &resp); err != nil {
-			return fmt.Errorf("failed to decode PromQL active-series response: %w", err)
+			return newInvalidResponseError(fmt.Errorf("failed to decode PromQL active-series response: %w", err))
 		}
 		if resp.Status == "error" {
 			return fmt.Errorf("%s", resp.Error)
@@ -831,7 +831,7 @@ var promqlActiveQueriesCmd = &cobra.Command{
 			Error string `json:"error,omitempty"`
 		}
 		if err := json.Unmarshal(body, &resp); err != nil {
-			return fmt.Errorf("failed to decode PromQL active-queries response: %w", err)
+			return newInvalidResponseError(fmt.Errorf("failed to decode PromQL active-queries response: %w", err))
 		}
 		if resp.Status == "error" {
 			return fmt.Errorf("%s", resp.Error)
@@ -900,7 +900,7 @@ var promqlTSDBCmd = &cobra.Command{
 			Error  string          `json:"error,omitempty"`
 		}
 		if err := json.Unmarshal(body, &envelope); err != nil {
-			return fmt.Errorf("failed to decode PromQL TSDB response: %w", err)
+			return newInvalidResponseError(fmt.Errorf("failed to decode PromQL TSDB response: %w", err))
 		}
 		if envelope.Status == "error" {
 			return fmt.Errorf("%s", envelope.Error)
@@ -919,7 +919,7 @@ var promqlTSDBCmd = &cobra.Command{
 			LabelValueCount      []cardinalityEntry `json:"labelValueCountByLabelName"`
 		}
 		if err := json.Unmarshal(envelope.Data, &data); err != nil {
-			return fmt.Errorf("failed to decode PromQL TSDB data: %w", err)
+			return newInvalidResponseError(fmt.Errorf("failed to decode PromQL TSDB data: %w", err))
 		}
 
 		d := data
