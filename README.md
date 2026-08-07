@@ -373,10 +373,6 @@ Errors use a stable envelope such as:
 line; it requires the server's gRPC port to be reachable and can be stopped
 with Ctrl+C.
 
-For agent-run SQL, allow only `SELECT` queries and never use `--save-as`, which
-writes a query to the local profile. Use `pb sql list -o json` to list saved
-queries without opening a terminal UI.
-
 > ⚠️ **Warning for agent access:** Create a dedicated read-only API key or role
 > with the minimum permissions required for queries and metadata reads. Do not
 > give an agent an administrator or shared human credential. Read-only access
