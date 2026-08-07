@@ -362,24 +362,16 @@ Use `pb <command> --help` to check output support. For automation, omit `-i`
 so SQL and PromQL commands print output instead of opening the terminal UI.
 Empty collections are encoded as `[]`, not `null`.
 
-In JSON mode, successful results go to stdout, diagnostics and structured
-errors go to stderr, and failures return a non-zero exit status. This keeps
-redirected result files safe to parse:
-
-```bash
-pb dataset list -o json >data.json 2>errors.json
-```
-
 Errors use a stable envelope such as:
 
 ```json
 {"error":{"code":"NOT_FOUND","message":"profile not found","retryable":false}}
 ```
 
-`pb status -o json` is the deliberate exception: an unhealthy status document
-is written to stdout and the process exits non-zero. `pb tail <dataset> -o json`
-is a long-running stream with one JSON value per line; it requires the server's
-gRPC port to be reachable and can be stopped with Ctrl+C.
+`pb status -o json` returns a non-zero exit status when the server is unhealthy.
+`pb tail <dataset> -o json` is a long-running stream with one JSON value per
+line; it requires the server's gRPC port to be reachable and can be stopped
+with Ctrl+C.
 
 For agent-run SQL, allow only `SELECT` queries and never use `--save-as`, which
 writes a query to the local profile. Use `pb sql list -o json` to list saved
