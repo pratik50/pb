@@ -56,11 +56,12 @@ var cli = &cobra.Command{
 		if p, _ := command.Flags().GetBool(versionFlag); p {
 			return pb.PrintVersion(Version, Commit)
 		}
-		if rootOutputFormat == "json" {
-			return printCommandJSON(command)
+		output, err := normalizeOutputFormat(rootOutputFormat)
+		if err != nil {
+			return err
 		}
-		if rootOutputFormat != "text" {
-			return fmt.Errorf("unsupported output format %q (expected text or json)", rootOutputFormat)
+		if output == "json" {
+			return printCommandJSON(command)
 		}
 		return command.Help()
 	},
@@ -312,7 +313,7 @@ func main() {
 	executed, err := cli.ExecuteC()
 	if err != nil {
 		if structuredErrors {
-			if renderErr := renderExecutionError(executed, err); renderErr != nil {
+			if renderErr := renderExecutionError(executed, err, true); renderErr != nil {
 				fmt.Fprintf(executed.ErrOrStderr(), "Error: %v\n", renderErr)
 			}
 		}
@@ -338,29 +339,15 @@ func requestsJSONOutput(args []string) bool {
 	return false
 }
 
-func renderExecutionError(command *cobra.Command, err error) error {
+func renderExecutionError(command *cobra.Command, err error, jsonOutput bool) error {
 	if err == nil || pb.ErrorWasRendered(err) {
 		return nil
 	}
-	if executionOutputFormat(command) == "json" {
+	if jsonOutput {
 		return pb.WriteErrorJSON(command.ErrOrStderr(), err)
 	}
 	_, writeErr := fmt.Fprintf(command.ErrOrStderr(), "Error: %v\n", err)
 	return writeErr
-}
-
-func executionOutputFormat(command *cobra.Command) string {
-	if command == nil {
-		return "text"
-	}
-	flag := command.Flags().Lookup("output")
-	if flag == nil {
-		flag = command.InheritedFlags().Lookup("output")
-	}
-	if flag == nil {
-		return "text"
-	}
-	return strings.ToLower(strings.TrimSpace(flag.Value.String()))
 }
 
 type jsonCommand struct {
@@ -420,14 +407,17 @@ func configureParentOutput(cmd *cobra.Command) {
 	cmd.Flags().StringVarP(&output, "output", "o", "text", "Output format (text|json)")
 	cmd.PreRunE = func(_ *cobra.Command, _ []string) error { return nil }
 	cmd.RunE = func(command *cobra.Command, _ []string) error {
-		switch output {
+		format, err := normalizeOutputFormat(output)
+		if err != nil {
+			return err
+		}
+		switch format {
 		case "json":
 			return printCommandJSON(command)
 		case "text":
 			return command.Help()
-		default:
-			return fmt.Errorf("unsupported output format %q (expected text or json)", output)
 		}
+		return nil
 	}
 }
 
@@ -442,17 +432,29 @@ func newHelpCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if output == "json" {
-				return printCommandJSON(target)
+			format, err := normalizeOutputFormat(output)
+			if err != nil {
+				return err
 			}
-			if output != "text" {
-				return fmt.Errorf("unsupported output format %q (expected text or json)", output)
+			if format == "json" {
+				return printCommandJSON(target)
 			}
 			return target.Help()
 		},
 	}
 	help.Flags().StringVarP(&output, "output", "o", "text", "Output format (text|json)")
 	return help
+}
+
+func normalizeOutputFormat(value string) (string, error) {
+	format := strings.ToLower(strings.TrimSpace(value))
+	if format == "" {
+		format = "text"
+	}
+	if format != "text" && format != "json" {
+		return "", fmt.Errorf("unsupported output format %q (expected text or json)", value)
+	}
+	return format, nil
 }
 
 func renderRootHelp(cmd *cobra.Command, _ []string) {

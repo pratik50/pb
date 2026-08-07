@@ -13,13 +13,13 @@ import (
 func TestRenderExecutionErrorJSON(t *testing.T) {
 	command := &cobra.Command{Use: "test"}
 	command.Flags().StringP("output", "o", "text", "output format")
-	if err := command.Flags().Set("output", "json"); err != nil {
-		t.Fatal(err)
-	}
 	var stderr bytes.Buffer
 	command.SetErr(&stderr)
 
-	if err := renderExecutionError(command, errors.New("boom")); err != nil {
+	// The parsed flag can still have its text default when command discovery
+	// fails before Cobra parses -o json. The raw-argument detector remains the
+	// source of truth for structured errors.
+	if err := renderExecutionError(command, errors.New("boom"), true); err != nil {
 		t.Fatal(err)
 	}
 	var result struct {
@@ -42,7 +42,7 @@ func TestRenderExecutionErrorText(t *testing.T) {
 	var stderr bytes.Buffer
 	command.SetErr(&stderr)
 
-	if err := renderExecutionError(command, errors.New("boom")); err != nil {
+	if err := renderExecutionError(command, errors.New("boom"), false); err != nil {
 		t.Fatal(err)
 	}
 	if stderr.String() != "Error: boom\n" {
@@ -56,7 +56,7 @@ func TestRenderExecutionErrorSkipsAlreadyRendered(t *testing.T) {
 	var stderr bytes.Buffer
 	command.SetErr(&stderr)
 
-	if err := renderExecutionError(command, pb.MarkErrorRendered(errors.New("boom"))); err != nil {
+	if err := renderExecutionError(command, pb.MarkErrorRendered(errors.New("boom")), true); err != nil {
 		t.Fatal(err)
 	}
 	if stderr.Len() != 0 {
@@ -72,6 +72,7 @@ func TestRequestsJSONOutput(t *testing.T) {
 		{[]string{"dataset", "list", "-o", "json"}, true},
 		{[]string{"dataset", "list", "--output=json"}, true},
 		{[]string{"dataset", "list", "-ojson"}, true},
+		{[]string{"dataset", "list", "-o", "JSON"}, true},
 		{[]string{"dataset", "list", "-o", "text"}, false},
 		{[]string{"sql", "run", "--", "-ojson"}, false},
 		{[]string{"dataset", "list"}, false},
@@ -80,5 +81,20 @@ func TestRequestsJSONOutput(t *testing.T) {
 		if got := requestsJSONOutput(test.args); got != test.want {
 			t.Fatalf("requestsJSONOutput(%q) = %t, want %t", test.args, got, test.want)
 		}
+	}
+}
+
+func TestNormalizeOutputFormat(t *testing.T) {
+	for _, input := range []string{"json", "JSON", " json "} {
+		format, err := normalizeOutputFormat(input)
+		if err != nil {
+			t.Fatalf("normalizeOutputFormat(%q): %v", input, err)
+		}
+		if format != "json" {
+			t.Fatalf("normalizeOutputFormat(%q) = %q, want json", input, format)
+		}
+	}
+	if _, err := normalizeOutputFormat("yaml"); err == nil {
+		t.Fatal("expected unsupported output format error")
 	}
 }

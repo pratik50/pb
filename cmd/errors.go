@@ -97,6 +97,9 @@ func errorDetails(err error) errorDetail {
 	if errors.Is(err, fs.ErrPermission) {
 		return errorDetail{Code: ErrorPermissionDenied, Message: err.Error(), Retryable: false}
 	}
+	if isCommandInputError(err) {
+		return errorDetail{Code: ErrorInvalidInput, Message: err.Error(), Retryable: false}
+	}
 	var statusErr interface{ HTTPStatusCode() int }
 	if errors.As(err, &statusErr) {
 		statusCode := statusErr.HTTPStatusCode()
@@ -116,6 +119,26 @@ func errorDetails(err error) errorDetail {
 		return errorDetail{Code: ErrorConnectionFailed, Message: err.Error(), Retryable: true}
 	}
 	return errorDetail{Code: ErrorCommandFailed, Message: err.Error(), Retryable: false}
+}
+
+func isCommandInputError(err error) bool {
+	message := err.Error()
+	for _, prefix := range []string{
+		"unknown command ",
+		"unknown flag: ",
+		"flag needs an argument: ",
+		"invalid argument ",
+		"requires at least ",
+		"accepts at most ",
+		"accepts between ",
+		"accepts ",
+		"unsupported output format ",
+	} {
+		if strings.HasPrefix(message, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func responseStatusError(action string, statusCode int, status string, body []byte) error {

@@ -111,6 +111,7 @@ On macOS, a manually downloaded binary may be blocked on first run. Allow it onc
 
 ```bash
 xattr -d com.apple.quarantine /usr/local/bin/pb
+```
 
 **Verify:** `pb --help`
 
@@ -333,19 +334,56 @@ pb promql ps
 
 ## Automation
 
-Commands print human-readable text by default. Commands that support
-`-o json` return structured output for scripts, CI, and agent workflows:
+Commands print human-readable text by default. For scripts, CI, and agents,
+start by discovering the read-only command catalog and machine-readable help:
+
+```bash
+pb agent -o json
+pb -o json
+pb help dataset list -o json
+```
+
+The agent catalog contains only read-only commands. It also records arguments,
+flags, required permissions, and safety constraints. Server-side permissions
+remain authoritative.
+
+Commands that support `-o json` return structured output:
 
 ```bash
 pb status -o json
 pb profile list -o json
 pb dataset list -o json
+pb sql list -o json
 pb sql run "SELECT count(*) FROM backend" --from=1h --output json
 pb promql run "up" --dataset otel_metrics --instant --output json
 ```
 
 Use `pb <command> --help` to check output support. For automation, omit `-i`
 so SQL and PromQL commands print output instead of opening the terminal UI.
+Empty collections are encoded as `[]`, not `null`.
+
+In JSON mode, successful results go to stdout, diagnostics and structured
+errors go to stderr, and failures return a non-zero exit status. This keeps
+redirected result files safe to parse:
+
+```bash
+pb dataset list -o json >data.json 2>errors.json
+```
+
+Errors use a stable envelope such as:
+
+```json
+{"error":{"code":"NOT_FOUND","message":"profile not found","retryable":false}}
+```
+
+`pb status -o json` is the deliberate exception: an unhealthy status document
+is written to stdout and the process exits non-zero. `pb tail <dataset> -o json`
+is a long-running stream with one JSON value per line; it requires the server's
+gRPC port to be reachable and can be stopped with Ctrl+C.
+
+For agent-run SQL, allow only `SELECT` queries and never use `--save-as`, which
+writes a query to the local profile. Use `pb sql list -o json` to list saved
+queries without opening a terminal UI.
 
 > ⚠️ **Warning for agent access:** Create a dedicated read-only API key or role
 > with the minimum permissions required for queries and metadata reads. Do not

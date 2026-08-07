@@ -85,6 +85,34 @@ func TestWriteErrorJSONClassifiesMissingFileAsNotFound(t *testing.T) {
 	}
 }
 
+func TestWriteErrorJSONClassifiesCommandInputErrors(t *testing.T) {
+	for _, message := range []string{
+		`unknown command "wat" for "pb"`,
+		"unknown flag: --wat",
+		"flag needs an argument: --output",
+		`invalid argument "wat" for "--output" flag`,
+		"requires at least 1 arg(s), only received 0",
+		"accepts at most 1 arg(s), received 2",
+		"accepts between 1 and 2 arg(s), received 3",
+		"accepts 1 arg(s), received 0",
+		`unsupported output format "yaml" (expected text or json)`,
+	} {
+		t.Run(message, func(t *testing.T) {
+			var output bytes.Buffer
+			if err := WriteErrorJSON(&output, errors.New(message)); err != nil {
+				t.Fatal(err)
+			}
+			var result errorEnvelope
+			if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			if result.Error.Code != ErrorInvalidInput || result.Error.Retryable {
+				t.Fatalf("unexpected command-input classification: %+v", result.Error)
+			}
+		})
+	}
+}
+
 func TestRenderedErrorMarker(t *testing.T) {
 	err := MarkErrorRendered(errors.New("already printed"))
 	if !ErrorWasRendered(err) {
