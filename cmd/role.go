@@ -430,7 +430,7 @@ func orDash(value string) string {
 }
 
 func fetchRoles(client *internalHTTP.HTTPClient, data *[]string) error {
-	req, err := client.NewRequest("GET", "role", nil)
+	req, err := client.NewRequest("GET", "roles", nil)
 	if err != nil {
 		return err
 	}
